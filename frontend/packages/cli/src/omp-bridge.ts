@@ -1,60 +1,32 @@
 import { createInterface } from 'node:readline'
 
 import {
-  type AgentEvent,
-  type AgentInput,
-  type AgentInteraction,
-  type InteractionAnswer,
+  type AgentEventStreamFrame,
   type OmnaraClient,
+  openAgentEventStream,
   sdk,
 } from '@omnara/sdk'
-import {
-  listAgentInteractionsOptions,
-  listQueuedBacklogInputsOptions,
-} from '@omnara/sdk/tanstack'
-import {
-  type AgentChatData,
-  type AgentChatProjection,
-  type AgentChatScope,
-  AgentChatSession,
-  agentChatHistoryQueryKey,
-  type OmnaraUIMessage,
-  projectAgentChat,
-  sequenceNumber,
-} from '@omnara/react'
-import { type InfiniteData, QueryClient, QueryObserver } from '@tanstack/react-query'
 import * as z from 'zod'
 
-const historyPageSize = 100
-const backlogQuery = { limit: 100 } as const
-const openInteractionsQuery = { state: 'open', limit: 100, include_subagents: true } as const
+import type { AgentChatScope } from '@omnara/react'
 
+type JsonValue = z.output<typeof z.json>
 type RpcId = number | string
-
-interface BridgeSnapshot {
-  agent: {
-    id: string
-    name?: string
-    state?: string
-  }
-  messages: Array<{ key: string; message: OmnaraUIMessage }>
-  backlogInputs: AgentChatProjection['backlogInputs']
-  status: AgentChatProjection['status']
-  isWorking: boolean
-  interaction?: AgentInteraction
-  hasOlderHistory: boolean
-  error?: string
-  streamError?: string
-}
 
 const zRpcRequest = z.object({
   jsonrpc: z.literal('2.0').optional(),
   id: z.union([z.number(), z.string()]),
   method: z.string(),
-  params: z.record(z.string(), z.unknown()).optional(),
+  params: z.record(z.string(), z.json()).optional(),
 })
 
-const zSendParams = z.object({ text: z.string().min(1) })
+const zLimitParams = z.object({ limit: z.number().int().min(1).max(500).optional() })
+const zStreamStartParams = z.object({ after_sequence: z.number().int().nonnegative().optional() })
+const zInputParams = z.object({
+  text: z.string().min(1),
+  idempotency_key: z.string().min(1),
+  delivery_mode: z.enum(['queued', 'steering']).default('queued'),
+})
 const zResolveParams = z.object({
   interaction_id: z.string().min(1),
   target_agent_id: z.string().min(1),
@@ -66,213 +38,184 @@ const zResolveParams = z.object({
   ),
 })
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+export function parseOmpBridgeRequest(line: string): z.output<typeof zRpcRequest> {
+  return zRpcRequest.parse(JSON.parse(line))
 }
 
-function writeFrame(frame: unknown): void {
+export function ompBridgeEventName(frame: AgentEventStreamFrame): string {
+  if ('event_kind' in frame) return frame.event_kind
+  if ('tool_call_id' in frame && 'state' in frame) return 'tool_call_update'
+  return 'model_output_delta'
+}
+
+function durableEventID(frame: AgentEventStreamFrame): string | undefined {
+  if (!('event_kind' in frame) || frame.sequence == null) return undefined
+  return String(frame.sequence)
+}
+
+function jsonValue(value: unknown): JsonValue {
+  return z.json().parse(value)
+}
+
+function writeFrame(frame: JsonValue): void {
   process.stdout.write(`${JSON.stringify(frame)}\n`)
 }
 
-function messageKey(message: OmnaraUIMessage, events: AgentEvent[]): string {
-  if (message.id.startsWith('local:')) {
-    const localID = message.id.slice('local:'.length)
-    return `input:${localID}`
-  }
-  const eventID = message.metadata?.eventId
-  if (eventID != null) {
-    const event = events.find((candidate) => candidate.id === eventID)
-    if (event?.event_kind === 'agent_input' && event.input_idempotency_key != null) {
-      return `input:${event.input_idempotency_key}`
-    }
-  }
-  return message.id
+function resultFrame(id: RpcId, result: JsonValue): JsonValue {
+  return { jsonrpc: '2.0', id, result }
 }
 
-export function bridgeMessageKey(message: OmnaraUIMessage, events: AgentEvent[]): string {
-  return messageKey(message, events)
+function errorFrame(id: RpcId | null, message: string, code = -32000): JsonValue {
+  return { jsonrpc: '2.0', id, error: { code, message } }
 }
 
-export async function runOmpBridge(
-  client: OmnaraClient,
-  scope: AgentChatScope,
-): Promise<void> {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        staleTime: Infinity,
-      },
-    },
-  })
+function notify(method: string, params: JsonValue): void {
+  writeFrame({ jsonrpc: '2.0', method, params })
+}
 
-  const [{ data: history }, { data: agentResult }] = await Promise.all([
-    sdk.listEvents({
-      client,
-      path: scope,
-      query: { before_sequence: 0, limit: historyPageSize },
-    }),
-    sdk.getAgent({ client, path: scope }),
-  ])
+/**
+ * Renderer-neutral bridge for external UIs.
+ *
+ * Omnara owns authentication, HTTP schemas, SSE recovery and API evolution.
+ * The client owns presentation. No Ink/React components cross this boundary.
+ */
+export async function runOmpBridge(client: OmnaraClient, scope: AgentChatScope): Promise<void> {
+  let streamAbort: AbortController | undefined
+  let streamTask: Promise<void> | undefined
 
-  const newestHistorySequence = sequenceNumber(history.data.at(-1)?.sequence)
-  queryClient.setQueryData<InfiniteData<{ data: AgentEvent[] }>>(
-    agentChatHistoryQueryKey(scope),
-    {
-      pages: [history],
-      pageParams: [0],
-    },
-  )
-
-  const backlogOptions = listQueuedBacklogInputsOptions({
-    client,
-    path: scope,
-    query: backlogQuery,
-  })
-  const interactionOptions = listAgentInteractionsOptions({
-    client,
-    path: scope,
-    query: openInteractionsQuery,
-  })
-
-  await Promise.all([
-    queryClient.ensureQueryData(backlogOptions),
-    queryClient.ensureQueryData(interactionOptions),
-  ])
-
-  const session = new AgentChatSession({
-    client,
-    queryClient,
-    ...scope,
-  })
-  session.start(newestHistorySequence)
-
-  let snapshotQueued = false
-  let closed = false
-
-  const buildData = (): AgentChatData => {
-    const live = session.getData()
-    const liveEvents = live.events.filter(
-      (event) => sequenceNumber(event.sequence) > newestHistorySequence,
-    )
-    const backlog = queryClient.getQueryData<{ data: AgentInput[] }>(backlogOptions.queryKey)
-    return {
-      ...live,
-      events: [...history.data, ...liveEvents],
-      backlogInputs: backlog?.data ?? [],
-      hasOlderEvents: history.next_before_sequence != null,
-    }
+  const stopStream = async () => {
+    streamAbort?.abort()
+    streamAbort = undefined
+    await streamTask?.catch(() => undefined)
+    streamTask = undefined
   }
 
-  const buildSnapshot = (): BridgeSnapshot => {
-    const data = buildData()
-    const projection = projectAgentChat(data)
-    const interactions = queryClient.getQueryData<{ data: AgentInteraction[] }>(
-      interactionOptions.queryKey,
-    )
-    return {
-      agent: {
-        id: scope.agentID,
-        name: agentResult.agent.name,
-        state: agentResult.agent.state,
-      },
-      messages: projection.messages.map((message) => ({
-        key: messageKey(message, data.events),
-        message,
-      })),
-      backlogInputs: projection.backlogInputs,
-      status: projection.status,
-      isWorking: projection.isWorking,
-      interaction: interactions?.data[0],
-      hasOlderHistory: data.hasOlderEvents,
-      error: data.error?.message,
-      streamError: data.streamError?.message,
-    }
-  }
-
-  const emitSnapshot = () => {
-    if (closed || snapshotQueued) return
-    snapshotQueued = true
-    queueMicrotask(() => {
-      snapshotQueued = false
-      if (closed) return
-      writeFrame({ jsonrpc: '2.0', method: 'snapshot', params: buildSnapshot() })
+  const startStream = (afterSequence: number) => {
+    void stopStream().then(() => {
+      const abort = new AbortController()
+      streamAbort = abort
+      streamTask = (async () => {
+        try {
+          const frames = openAgentEventStream({
+            client,
+            path: scope,
+            query: { after_sequence: afterSequence, stream_deltas: true },
+            signal: abort.signal,
+            onConnectionStateChange(state) {
+              notify('stream.connection', jsonValue(state))
+            },
+          })
+          for await (const frame of frames) {
+            const event = ompBridgeEventName(frame)
+            const id = durableEventID(frame)
+            notify(
+              'stream.event',
+              jsonValue({
+                event,
+                ...(id == null ? {} : { id }),
+                data: frame,
+              }),
+            )
+          }
+        } catch (error) {
+          if (abort.signal.aborted) return
+          const message = error instanceof Error ? error.message : 'Omnara event stream failed'
+          notify('stream.error', { message })
+        }
+      })()
     })
   }
 
-  const unsubscribeSession = session.subscribe(emitSnapshot)
-  const backlogObserver = new QueryObserver(queryClient, backlogOptions)
-  const interactionObserver = new QueryObserver(queryClient, interactionOptions)
-
-  const unsubscribeBacklog = backlogObserver.subscribe((result) => {
-    session.confirmBacklogInputs(result.data?.data ?? [])
-    emitSnapshot()
+  notify('ready', {
+    agent_id: scope.agentID,
+    org_id: scope.orgID,
+    project_id: scope.projectID,
   })
-  const unsubscribeInteractions = interactionObserver.subscribe(() => emitSnapshot())
-
-  writeFrame({
-    jsonrpc: '2.0',
-    method: 'ready',
-    params: {
-      agent_id: scope.agentID,
-      org_id: scope.orgID,
-      project_id: scope.projectID,
-    },
-  })
-  emitSnapshot()
-
-  const respond = (id: RpcId, result: unknown) => {
-    writeFrame({ jsonrpc: '2.0', id, result })
-  }
-  const reject = (id: RpcId, error: unknown) => {
-    writeFrame({
-      jsonrpc: '2.0',
-      id,
-      error: { code: -32000, message: errorMessage(error) },
-    })
-  }
 
   const reader = createInterface({ input: process.stdin, crlfDelay: Infinity })
   try {
     for await (const line of reader) {
       if (!line.trim()) continue
-      const parsed = zRpcRequest.safeParse(JSON.parse(line))
-      if (!parsed.success) {
-        writeFrame({
-          jsonrpc: '2.0',
-          id: null,
-          error: { code: -32600, message: 'invalid bridge request' },
-        })
+
+      let request: z.output<typeof zRpcRequest>
+      try {
+        request = parseOmpBridgeRequest(line)
+      } catch {
+        writeFrame(errorFrame(null, 'invalid bridge request', -32600))
         continue
       }
-      const { id, method, params = {} } = parsed.data
+
+      const { id, method, params = {} } = request
       try {
         if (method === 'ping') {
-          respond(id, { ok: true })
+          writeFrame(resultFrame(id, { ok: true }))
           continue
         }
-        if (method === 'message.send') {
-          const input = zSendParams.parse(params)
-          const projection = projectAgentChat(buildData())
-          const backlog = projection.backlogInputs
-          const live = session.getData()
-          const placement =
-            projection.isWorking || backlog.length > 0 || live.localInputs.length > 0
-              ? 'backlog'
-              : 'conversation'
-          await session.sendMessage({ text: input.text }, placement)
-          respond(id, { accepted: true, placement })
+
+        if (method === 'agent.get') {
+          const { data } = await sdk.getAgent({ client, path: scope })
+          writeFrame(resultFrame(id, jsonValue(data)))
           continue
         }
+
+        if (method === 'events.list') {
+          const input = zLimitParams.parse(params)
+          const { data } = await sdk.listEvents({
+            client,
+            path: scope,
+            query: { before_sequence: 0, limit: input.limit ?? 100 },
+          })
+          writeFrame(resultFrame(id, jsonValue(data)))
+          continue
+        }
+
+        if (method === 'tool_calls.list') {
+          const input = zLimitParams.parse(params)
+          const { data } = await sdk.listToolCalls({
+            client,
+            path: scope,
+            query: { include_subagents: true, limit: input.limit ?? 500 },
+          })
+          writeFrame(resultFrame(id, jsonValue(data)))
+          continue
+        }
+
+        if (method === 'interactions.list') {
+          const input = zLimitParams.parse(params)
+          const { data } = await sdk.listAgentInteractions({
+            client,
+            path: scope,
+            query: {
+              state: 'open',
+              include_subagents: true,
+              limit: input.limit ?? 500,
+            },
+          })
+          writeFrame(resultFrame(id, jsonValue(data)))
+          continue
+        }
+
+        if (method === 'input.create') {
+          const input = zInputParams.parse(params)
+          const { data } = await sdk.createAgentInput({
+            client,
+            path: scope,
+            headers: { 'Idempotency-Key': input.idempotency_key },
+            body: {
+              content_blocks: [{ type: 'text', text: input.text }],
+              delivery_mode: input.delivery_mode,
+            },
+          })
+          writeFrame(resultFrame(id, jsonValue(data)))
+          continue
+        }
+
         if (method === 'agent.cancel') {
           const { data } = await sdk.cancelAgent({ client, path: scope })
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: backlogOptions.queryKey }),
-            queryClient.invalidateQueries({ queryKey: interactionOptions.queryKey }),
-          ])
-          respond(id, data)
+          writeFrame(resultFrame(id, jsonValue(data)))
           continue
         }
+
         if (method === 'interaction.resolve') {
           const input = zResolveParams.parse(params)
           const { data } = await sdk.resolveAgentInteraction({
@@ -283,27 +226,33 @@ export async function runOmpBridge(
               agentID: input.target_agent_id,
               interactionID: input.interaction_id,
             },
-            body: { answers: input.answers as InteractionAnswer[] },
+            body: { answers: input.answers },
           })
-          await queryClient.invalidateQueries({ queryKey: interactionOptions.queryKey })
-          respond(id, data)
+          writeFrame(resultFrame(id, jsonValue(data)))
           continue
         }
-        writeFrame({
-          jsonrpc: '2.0',
-          id,
-          error: { code: -32601, message: `unknown bridge method: ${method}` },
-        })
+
+        if (method === 'stream.start') {
+          const input = zStreamStartParams.parse(params)
+          startStream(input.after_sequence ?? 0)
+          writeFrame(resultFrame(id, { started: true }))
+          continue
+        }
+
+        if (method === 'stream.stop') {
+          await stopStream()
+          writeFrame(resultFrame(id, { stopped: true }))
+          continue
+        }
+
+        writeFrame(errorFrame(id, `unknown bridge method: ${method}`, -32601))
       } catch (error) {
-        reject(id, error)
+        const message = error instanceof Error ? error.message : 'Omnara bridge request failed'
+        writeFrame(errorFrame(id, message))
       }
     }
   } finally {
-    closed = true
-    unsubscribeInteractions()
-    unsubscribeBacklog()
-    unsubscribeSession()
-    session.disconnect()
-    queryClient.clear()
+    reader.close()
+    await stopStream()
   }
 }
