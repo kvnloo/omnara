@@ -1,43 +1,35 @@
 import { describe, expect, it } from 'vitest'
 
-import type { AgentEvent } from '@omnara/sdk'
-import type { OmnaraUIMessage } from '@omnara/react'
+import { parseOmpBridgeRequest } from './omp-bridge.ts'
 
-import { bridgeMessageKey } from './omp-bridge.ts'
-
-describe('OMP bridge message identity', () => {
-  it('keeps optimistic and durable user messages on the same key', () => {
-    const optimistic = {
-      id: 'local:req-123',
-      role: 'user',
-      parts: [],
-    } as OmnaraUIMessage
-    expect(bridgeMessageKey(optimistic, [])).toBe('input:req-123')
-
-    const durable = {
-      id: 'evt-message',
-      role: 'user',
-      parts: [],
-      metadata: { eventId: 'evt-1' },
-    } as OmnaraUIMessage
-    const events = [
-      {
-        id: 'evt-1',
-        event_kind: 'agent_input',
-        input_idempotency_key: 'req-123',
+describe('OMP bridge protocol', () => {
+  it('accepts a typed request with JSON params', () => {
+    expect(
+      parseOmpBridgeRequest(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 7,
+          method: 'input.create',
+          params: {
+            text: 'hello',
+            idempotency_key: 'omp-1',
+            delivery_mode: 'steering',
+          },
+        }),
+      ),
+    ).toEqual({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'input.create',
+      params: {
+        text: 'hello',
+        idempotency_key: 'omp-1',
+        delivery_mode: 'steering',
       },
-    ] as AgentEvent[]
-
-    expect(bridgeMessageKey(durable, events)).toBe('input:req-123')
+    })
   })
 
-  it('leaves stable assistant turn keys untouched', () => {
-    const assistant = {
-      id: 'turn:trn_123',
-      role: 'assistant',
-      parts: [],
-    } as OmnaraUIMessage
-
-    expect(bridgeMessageKey(assistant, [])).toBe('turn:trn_123')
+  it('rejects malformed protocol input before dispatch', () => {
+    expect(() => parseOmpBridgeRequest('{"method":"input.create"}')).toThrow()
   })
 })
