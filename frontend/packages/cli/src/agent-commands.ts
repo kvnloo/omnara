@@ -56,7 +56,6 @@ export const agentEventsStreamOp = customOp({
   },
 })
 
-
 export const agentOmpBridgeOp = customOp({
   verb: 'bridge-omp',
   summary: 'Expose an agent over the experimental OMP renderer bridge',
