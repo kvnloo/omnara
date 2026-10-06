@@ -48,7 +48,8 @@ and processes, not the durable agent conversation contract.
 - `events.list`
 - `tool_calls.list` with subagents
 - `interactions.list` with subagents
-- `input.create` with idempotency key and queued/steering delivery
+- `input.create` with idempotency key, queued/steering delivery, and typed
+  inline media attachments
 - `interaction.resolve`
 - `agent.cancel`
 - `stream.start`
@@ -75,6 +76,11 @@ The bridge emits transient model-output deltas for presentation but relies on
 Omnara's existing `openAgentEventStream` implementation for validation,
 reconnection and durable cursor recovery. Tool update notifications cause the
 OMP adapter to refresh authoritative tool-call state.
+
+For user input, the bridge validates attachments with Omnara's generated
+`InlineMediaContentBlock` schema and submits them through the official SDK. It
+also follows Omnara's existing chat convention by adding a model-visible,
+transcript-hidden source hint identifying OMP as the active surface.
 
 ## Human interaction
 
