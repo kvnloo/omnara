@@ -90,7 +90,7 @@ function durableEventID(frame: AgentEventStreamFrame): string | undefined {
   return String(frame.sequence)
 }
 
-function jsonValue(value: JsonValue): JsonValue {
+function jsonValue(value: unknown): JsonValue {
   return z.json().parse(value)
 }
 
