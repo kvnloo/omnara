@@ -16,6 +16,13 @@ export {
   useAgentChat,
   type UseAgentChatResult,
 } from './domains/agent-chat'
+export {
+  type AgentChatProjection,
+  eventsAfterSequence,
+  projectAgentChat,
+  sequenceNumber,
+} from './domains/agent-chat-messages'
+export { agentChatHistoryQueryKey } from './domains/agent-chat-history'
 export { useAgentConfigTools } from './domains/agent-config-tools'
 export {
   abbreviate,
