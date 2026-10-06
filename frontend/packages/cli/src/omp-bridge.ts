@@ -39,6 +39,31 @@ const zInputParams = z
   .refine((input) => input.text.trim() !== '' || input.attachments.length > 0, {
     message: 'input requires text or an attachment',
   })
+
+const ompSourceHint =
+  'This message came from an OMP terminal frontend connected through Omnara. Reply with normal assistant text unless explicitly asked to message an integration.'
+
+/** Mirrors Omnara chat surfaces: provenance is model-visible but hidden from the transcript. */
+export function buildOmpInputBody(input: z.output<typeof zInputParams>) {
+  return {
+    content_blocks: [
+      {
+        type: 'text' as const,
+        text: ompSourceHint,
+        metadata: { omnara_hidden: 'true' },
+      },
+      ...(input.text.trim() === '' ? [] : [{ type: 'text' as const, text: input.text }]),
+      ...input.attachments.map((attachment) => ({
+        type: 'media' as const,
+        media_type: attachment.media_type,
+        filename: attachment.filename,
+        data: attachment.data,
+      })),
+    ],
+    delivery_mode: input.delivery_mode,
+  }
+}
+
 const zResolveParams = z.object({
   interaction_id: z.string().min(1),
   target_agent_id: z.string().min(1),
@@ -213,18 +238,7 @@ export async function runOmpBridge(client: OmnaraClient, scope: OmpBridgeScope):
             client,
             path: scope,
             headers: { 'Idempotency-Key': input.idempotency_key },
-            body: {
-              content_blocks: [
-                ...(input.text.trim() === '' ? [] : [{ type: 'text' as const, text: input.text }]),
-                ...input.attachments.map((attachment) => ({
-                  type: 'media' as const,
-                  media_type: attachment.media_type,
-                  filename: attachment.filename,
-                  data: attachment.data,
-                })),
-              ],
-              delivery_mode: input.delivery_mode,
-            },
+            body: buildOmpInputBody(input),
           })
           writeFrame(resultFrame(id, jsonValue(data)))
           continue
