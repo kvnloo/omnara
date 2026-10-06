@@ -2,41 +2,67 @@
 
 Companion OMP branch: `kvnloo/oh-my-pi:exp/omnara-backend`.
 
-## Result so far
+## Result
 
-The first dogfood slice does **not** require an Omnara backend change.
+The public Omnara backend already has the runtime semantics OMP needs. The
+missing piece was an ownership-clean process boundary.
 
-Omnara's existing public agent API already exposes the runtime boundary OMP needs:
+This branch now exposes:
 
-- `POST /inputs` — submit user input with an idempotency key.
-- `GET /events` — hydrate durable timeline history.
-- `GET /events/stream?stream_deltas=true` — resumable SSE for live output.
-- `GET /tool-calls?include_subagents=true` — authoritative tool lifecycle.
-- `GET /interactions?state=open&include_subagents=true` — human-in-the-loop prompts.
-- `POST /interactions/{interaction_id}/resolve` — resolve an interaction on its owning agent.
-- `POST /cancel` — interrupt the active agent.
-- `GET /agents/{agent_id}` — agent/model metadata.
+```text
+omnara agents bridge-omp <agent-id>
+```
 
-The OMP experiment consumes those APIs directly. This branch remains isolated so any
-server-side gap discovered during dogfooding has a place to land without changing
-Omnara main prematurely.
+It is a renderer-neutral NDJSON JSON-RPC bridge implemented in the Omnara CLI
+and backed entirely by Omnara's official TypeScript SDK.
 
 ## Boundary
 
 ```text
 OMP InteractiveMode / Composer / transcript / TSP / Tern
                         ↓
-              thin Omnara adapter
+             tiny JSON-RPC client
                         ↓
-        Omnara REST + resumable SSE
+        omnara agents bridge-omp
+                        ↓
+ official SDK / schemas / resilient SSE
                         ↓
              Omnara durable agent
 ```
 
-OMP owns presentation. Omnara remains authoritative for the remote agent timeline,
-tools, interactions, subagents and cancellation.
+The ownership rule is the important part:
 
-## Event ownership
+- OMP owns presentation and translates Omnara-native events into its existing
+  `AgentSessionEvent` lifecycle.
+- Omnara owns authentication, REST paths, generated schemas, SSE recovery,
+  cursor handling, and API evolution.
+- No Omnara Ink/React UI is copied into OMP.
+- OMP does not maintain a second Omnara HTTP/SSE implementation.
+
+The internal machine daemon protocol remains out of this path; it owns machines
+and processes, not the durable agent conversation contract.
+
+## Bridge requests
+
+- `agent.get`
+- `events.list`
+- `tool_calls.list` with subagents
+- `interactions.list` with subagents
+- `input.create` with idempotency key and queued/steering delivery
+- `interaction.resolve`
+- `agent.cancel`
+- `stream.start`
+- `stream.stop`
+- `ping`
+
+Notifications:
+
+- `ready`
+- `stream.event`
+- `stream.connection`
+- `stream.error`
+
+## State ownership
 
 Durable Omnara events remain source of truth:
 
@@ -45,23 +71,37 @@ Durable Omnara events remain source of truth:
 - `tool_result`
 - `context_checkpoint`
 
-Streaming `model_output_delta` frames are presentation-only previews. Tool update
-notifications trigger reconciliation against the authoritative tool-call list.
-
-The adapter follows Omnara's own terminal-event rule: a model output is terminal
-when it is not a `max_tokens` continuation and contains no tool calls. Durable
-control events also settle the OMP surface.
+The bridge emits transient model-output deltas for presentation but relies on
+Omnara's existing `openAgentEventStream` implementation for validation,
+reconnection and durable cursor recovery. Tool update notifications cause the
+OMP adapter to refresh authoritative tool-call state.
 
 ## Human interaction
 
-The experiment projects Omnara interactions into OMP's existing native selector
-and text-input surfaces. It never invents user consent. Multi-select remains open
-until we add an exact UI mapping.
+The OMP companion branch projects Omnara interactions into OMP's existing
+native selector and text-input surfaces. It never invents user consent.
+Multi-select remains open until there is an exact UI mapping.
+
+## Dogfood
+
+The OMP branch can invoke this checkout directly with:
+
+```bash
+OMNARA_ROOT=/path/to/kvnloo/omnara \
+OMNARA_API_KEY=omnara_pat_v1_... \
+OMNARA_ORG_ID=org_... \
+OMNARA_PROJECT_ID=proj_... \
+OMNARA_AGENT_ID=agt_... \
+bun run omnara:tui
+```
 
 ## Provenance
 
-- Omnara's public agent/event/tool/interaction contracts: the Omnara team.
-- OMP InteractiveMode, TUI, native TSP and Tern implementation: Can Bölük / Stencil Labs.
-- Backend-inversion experiment and comparison with the Hermes spike: Kevin Rajan.
+- Omnara's chat/event and resilient-streaming surfaces: Christian Sparks,
+  Asher Dale, ksarangmath, and the Omnara team.
+- OMP InteractiveMode, TUI, native TSP and Tern implementation: Can Bölük /
+  Stencil Labs.
+- OMP UI-as-client/session-host direction: André Braït.
+- Backend-inversion experiment and Hermes/Omnara comparison: Kevin Rajan.
 
 This is a dogfood experiment, not an upstream architecture recommendation.
