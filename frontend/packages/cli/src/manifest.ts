@@ -2,7 +2,7 @@ import { type MemoryFile, sdk } from '@omnara/sdk'
 import * as schemas from '@omnara/sdk/zod'
 import * as z from 'zod'
 
-import { agentChatOp, agentEventsStreamOp } from './agent-commands.ts'
+import { agentChatOp, agentEventsStreamOp, agentOmpBridgeOp } from './agent-commands.ts'
 import { formatAgentEventList } from './agent-rendering.ts'
 import {
   currentProfileConfigId,
@@ -110,6 +110,7 @@ export const commandGroups: CommandGroup[] = [
         run: runAgentMcpAdd,
       }),
       agentChatOp,
+      agentOmpBridgeOp,
       op({
         verb: 'input',
         summary: 'Send input to an agent',
