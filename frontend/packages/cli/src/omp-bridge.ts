@@ -6,9 +6,9 @@ import {
   openAgentEventStream,
   sdk,
 } from '@omnara/sdk'
-import * as z from 'zod'
-
 import type { AgentChatScope } from '@omnara/react'
+import * as schemas from '@omnara/sdk/zod'
+import * as z from 'zod'
 
 type JsonValue = z.output<typeof z.json>
 type RpcId = number | string
@@ -22,11 +22,18 @@ const zRpcRequest = z.object({
 
 const zLimitParams = z.object({ limit: z.number().int().min(1).max(500).optional() })
 const zStreamStartParams = z.object({ after_sequence: z.number().int().nonnegative().optional() })
-const zInputParams = z.object({
-  text: z.string().min(1),
-  idempotency_key: z.string().min(1),
-  delivery_mode: z.enum(['queued', 'steering']).default('queued'),
-})
+const zBridgeAttachment = schemas.zInlineMediaContentBlock.omit({ type: true, metadata: true })
+
+const zInputParams = z
+  .object({
+    text: z.string(),
+    idempotency_key: z.string().min(1),
+    delivery_mode: z.enum(['queued', 'steering']).default('queued'),
+    attachments: z.array(zBridgeAttachment).default([]),
+  })
+  .refine((input) => input.text.trim() !== '' || input.attachments.length > 0, {
+    message: 'input requires text or an attachment',
+  })
 const zResolveParams = z.object({
   interaction_id: z.string().min(1),
   target_agent_id: z.string().min(1),
@@ -202,7 +209,15 @@ export async function runOmpBridge(client: OmnaraClient, scope: AgentChatScope):
             path: scope,
             headers: { 'Idempotency-Key': input.idempotency_key },
             body: {
-              content_blocks: [{ type: 'text', text: input.text }],
+              content_blocks: [
+                ...(input.text.trim() === '' ? [] : [{ type: 'text' as const, text: input.text }]),
+                ...input.attachments.map((attachment) => ({
+                  type: 'media' as const,
+                  media_type: attachment.media_type,
+                  filename: attachment.filename,
+                  data: attachment.data,
+                })),
+              ],
               delivery_mode: input.delivery_mode,
             },
           })
