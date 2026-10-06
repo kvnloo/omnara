@@ -86,11 +86,11 @@ export function ompBridgeEventName(frame: AgentEventStreamFrame): string {
 }
 
 function durableEventID(frame: AgentEventStreamFrame): string | undefined {
-  if (!('event_kind' in frame) || frame.sequence == null) return undefined
+  if (!('event_kind' in frame)) return undefined
   return String(frame.sequence)
 }
 
-function jsonValue(value: unknown): JsonValue {
+function jsonValue(value: JsonValue): JsonValue {
   return z.json().parse(value)
 }
 
@@ -145,14 +145,13 @@ export async function runOmpBridge(client: OmnaraClient, scope: OmpBridgeScope):
           for await (const frame of frames) {
             const event = ompBridgeEventName(frame)
             const id = durableEventID(frame)
-            notify(
-              'stream.event',
-              jsonValue({
-                event,
-                ...(id == null ? {} : { id }),
-                data: frame,
-              }),
-            )
+            const notification: {
+              event: string
+              id?: string
+              data: AgentEventStreamFrame
+            } = { event, data: frame }
+            if (id != null) notification.id = id
+            notify('stream.event', jsonValue(notification))
           }
         } catch (error) {
           if (abort.signal.aborted) return
