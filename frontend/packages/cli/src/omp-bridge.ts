@@ -1,9 +1,17 @@
 import { createInterface } from 'node:readline'
 
 import {
+  type AgentEventStreamConnectionState,
   type AgentEventStreamFrame,
+  type CancelAgentResponse,
+  type CreateAgentInputResponse,
+  type GetAgentResponse,
+  type ListAgentEventsResponse,
+  type ListAgentInteractionsResponse,
+  type ListToolCallsResponse,
   type OmnaraClient,
   openAgentEventStream,
+  type ResolveAgentInteractionResponse,
   sdk,
 } from '@omnara/sdk'
 import * as schemas from '@omnara/sdk/zod'
@@ -11,6 +19,23 @@ import * as z from 'zod'
 
 type JsonValue = z.output<ReturnType<typeof z.json>>
 type RpcId = number | string
+
+interface StreamEventNotification {
+  event: string
+  id?: string
+  data: AgentEventStreamFrame
+}
+
+type BridgeJsonDomain =
+  | AgentEventStreamFrame
+  | CancelAgentResponse
+  | CreateAgentInputResponse
+  | GetAgentResponse
+  | ListAgentEventsResponse
+  | ListAgentInteractionsResponse
+  | ListToolCallsResponse
+  | ResolveAgentInteractionResponse
+  | StreamEventNotification
 
 interface OmpBridgeScope {
   orgID: string
@@ -90,8 +115,27 @@ function durableEventID(frame: AgentEventStreamFrame): string | undefined {
   return String(frame.sequence)
 }
 
-function jsonValue(value: unknown): JsonValue {
+function jsonValue(value: BridgeJsonDomain): JsonValue {
   return z.json().parse(value)
+}
+
+function connectionStateValue(state: AgentEventStreamConnectionState): JsonValue {
+  if (state.state === 'connected') {
+    return { state: 'connected', reconnected: state.reconnected }
+  }
+  return {
+    state: 'reconnecting',
+    attempt: state.attempt,
+    delayMs: state.delayMs,
+    error: {
+      name: state.error.name,
+      message: state.error.message,
+      kind: state.error.kind,
+      status: state.error.status ?? null,
+      code: state.error.code ?? null,
+      retryAfterMs: state.error.retryAfterMs ?? null,
+    },
+  }
 }
 
 function writeFrame(frame: JsonValue): void {
@@ -139,17 +183,13 @@ export async function runOmpBridge(client: OmnaraClient, scope: OmpBridgeScope):
             query: { after_sequence: afterSequence, stream_deltas: true },
             signal: abort.signal,
             onConnectionStateChange(state) {
-              notify('stream.connection', jsonValue(state))
+              notify('stream.connection', connectionStateValue(state))
             },
           })
           for await (const frame of frames) {
             const event = ompBridgeEventName(frame)
             const id = durableEventID(frame)
-            const notification: {
-              event: string
-              id?: string
-              data: AgentEventStreamFrame
-            } = { event, data: frame }
+            const notification: StreamEventNotification = { event, data: frame }
             if (id != null) notification.id = id
             notify('stream.event', jsonValue(notification))
           }
