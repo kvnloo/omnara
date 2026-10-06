@@ -6,12 +6,17 @@ import {
   openAgentEventStream,
   sdk,
 } from '@omnara/sdk'
-import type { AgentChatScope } from '@omnara/react'
 import * as schemas from '@omnara/sdk/zod'
 import * as z from 'zod'
 
-type JsonValue = z.output<typeof z.json>
+type JsonValue = z.output<ReturnType<typeof z.json>>
 type RpcId = number | string
+
+interface OmpBridgeScope {
+  orgID: string
+  projectID: string
+  agentID: string
+}
 
 const zRpcRequest = z.object({
   jsonrpc: z.literal('2.0').optional(),
@@ -86,7 +91,7 @@ function notify(method: string, params: JsonValue): void {
  * Omnara owns authentication, HTTP schemas, SSE recovery and API evolution.
  * The client owns presentation. No Ink/React components cross this boundary.
  */
-export async function runOmpBridge(client: OmnaraClient, scope: AgentChatScope): Promise<void> {
+export async function runOmpBridge(client: OmnaraClient, scope: OmpBridgeScope): Promise<void> {
   let streamAbort: AbortController | undefined
   let streamTask: Promise<void> | undefined
 
