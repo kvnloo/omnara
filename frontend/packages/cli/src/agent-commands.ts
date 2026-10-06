@@ -3,9 +3,9 @@ import * as schemas from '@omnara/sdk/zod'
 import * as z from 'zod'
 
 import { runChat } from './chat.tsx'
-import { runOmpBridge } from './omp-bridge.ts'
 import { customOp, parseNumberFlag, parseWithSchema } from './factory.ts'
 import { canPromptInteractively, promptAgentSelection } from './interactive.ts'
+import { runOmpBridge } from './omp-bridge.ts'
 import { CliInputError } from './output.ts'
 
 export const agentChatOp = customOp({
