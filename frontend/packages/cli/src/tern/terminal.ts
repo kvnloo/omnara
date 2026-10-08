@@ -22,10 +22,16 @@ function retainedPrefixLength(value: string, marker: string): number {
   return 0
 }
 
+/** Ordinary terminal input and the TSP payloads split out of one stdin chunk. */
+export interface TspInputChunk {
+  input: string
+  tsp: string[]
+}
+
 export class TspInputDecoder {
   private pending = ''
 
-  push(chunk: string): { input: string; tsp: string[] } {
+  push(chunk: string): TspInputChunk {
     this.pending += chunk
     let input = ''
     const tsp: string[] = []
@@ -116,7 +122,7 @@ export class TernInputMux extends PassThrough {
   }
 
   private readonly onSourceData = (data: string | Buffer): void => {
-    const decoded = this.decoder.push(typeof data === 'string' ? data : data.toString('utf8'))
+    const decoded = this.decoder.push(data.toString())
     for (const payload of decoded.tsp) this.emit('tsp', payload)
     if (decoded.input === '') return
     // Tern still delivers ordinary keys as pty input while it shows the native

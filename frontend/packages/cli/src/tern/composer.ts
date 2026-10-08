@@ -3,11 +3,15 @@ import {
   OMNARA_TSP_PROGRAM_FEATURES,
   type TspEvent,
   type TspHello,
+  type TspJson,
 } from './protocol.ts'
 
 export const TERN_SURFACE_ID = 'omnara:session'
 export const TERN_COMPOSER_ID = 'omnara:composer'
-export type ComposerSnapshot = { cursor: number; text: string }
+export interface ComposerSnapshot {
+  cursor: number
+  text: string
+}
 
 const clamp = (n: number, max: number) =>
   Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), 0), max) : 0
@@ -121,7 +125,7 @@ export class TernComposerTransport {
     this.pending = null
     this.write(encodeTspJson('x', { id: TERN_SURFACE_ID, keep: false }, this.limit))
   }
-  private ops(ops: unknown[]) {
+  private ops(ops: TspJson[]) {
     this.seq++
     this.write(encodeTspJson('f', { ops, s: this.seq, sf: TERN_SURFACE_ID }, this.limit))
   }

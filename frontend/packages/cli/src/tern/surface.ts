@@ -54,6 +54,7 @@ export function useTernComposerSurface({
     }
 
     let cancelled = false
+    const isCancelled = (): boolean => cancelled
     let unsubscribe: (() => void) | undefined
     let unsubscribeKeys: (() => void) | undefined
     let resume: (() => Promise<void>) | undefined
@@ -62,7 +63,8 @@ export function useTernComposerSurface({
     void (async () => {
       try {
         const suspension = await suspendTerminal()
-        if (cancelled) {
+        // The effect cleanup may have run while suspendTerminal was pending.
+        if (isCancelled()) {
           await suspension.resume()
           return
         }
@@ -73,7 +75,9 @@ export function useTernComposerSurface({
         cursorRef.current = draftRef.current.length
         sendLockedRef.current = false
 
-        const transport = new TernComposerTransport((data) => terminal.write(data), hello)
+        const transport = new TernComposerTransport((data) => {
+          terminal.write(data)
+        }, hello)
         transportRef.current = transport
         transport.start({ cursor: cursorRef.current, text: nativeTextRef.current }, true)
 
