@@ -37,6 +37,9 @@ export const supportsTernLiveSurface = (hello: TspHello): boolean =>
   supportsTernComposer(hello) &&
   ['md', 'card', 'text', 'tool', 'code'].every((kind) => hello.kinds.includes(kind))
 
+export const supportsTernAgentSurface = (hello: TspHello): boolean =>
+  supportsTernLiveSurface(hello) && hello.kinds.includes('agent')
+
 export class TernComposerTransport {
   private acked = 0
   private credits: number
