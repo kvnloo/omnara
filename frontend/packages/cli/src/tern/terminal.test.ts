@@ -22,17 +22,20 @@ describe('TSP stdin filtering', () => {
   })
 })
 
+class FakeTtyInput extends PassThrough {
+  readonly isTTY = true
+}
+
 describe('native ownership input routing', () => {
   it('hands pty keys to native listeners instead of dropping them, and never to Ink', () => {
-    const source = new PassThrough() as PassThrough & { isTTY?: boolean }
-    source.isTTY = true
-    const terminal = new TernTerminal(
-      source as unknown as NodeJS.ReadStream,
-      {
-        isTTY: true,
-        write: () => true,
-      } as unknown as NodeJS.WriteStream,
-    )
+    const source = new FakeTtyInput()
+    const output: string[] = []
+    const terminal = new TernTerminal(source, {
+      isTTY: true,
+      write: (data) => {
+        output.push(data)
+      },
+    })
     const inkInput: string[] = []
     terminal.stdin.on('data', (chunk: Buffer | string) => inkInput.push(chunk.toString()))
     const keys: string[] = []
@@ -46,6 +49,8 @@ describe('native ownership input routing', () => {
 
     expect(keys).toEqual(['bc'])
     expect(inkInput.join('')).toBe('ad')
+    // Bracketed paste is on only while the native composer owns input.
+    expect(output).toEqual(['\x1b[?2004h', '\x1b[?2004l'])
     terminal.dispose()
   })
 })

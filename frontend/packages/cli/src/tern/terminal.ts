@@ -11,6 +11,8 @@ import {
 
 const TSP_START = '\x1b_tsp;'
 const ST = '\x1b\\'
+const BRACKETED_PASTE_ON = '\x1b[?2004h'
+const BRACKETED_PASTE_OFF = '\x1b[?2004l'
 
 function retainedPrefixLength(value: string, marker: string): number {
   const max = Math.min(value.length, marker.length - 1)
@@ -58,11 +60,21 @@ export class TspInputDecoder {
   }
 }
 
-type RawReadable = NodeJS.ReadStream & {
-  isTTY?: boolean
-  setRawMode?: (enabled: boolean) => unknown
-  ref?: () => unknown
-  unref?: () => unknown
+/** The slice of a tty input stream the mux reads (process.stdin in production). */
+export interface TernInputSource {
+  readonly isTTY?: boolean
+  setEncoding: (encoding: BufferEncoding) => void
+  on: (event: 'data', listener: (data: string | Buffer) => void) => void
+  off: (event: 'data', listener: (data: string | Buffer) => void) => void
+  setRawMode?: (enabled: boolean) => void
+  ref?: () => void
+  unref?: () => void
+}
+
+/** The slice of a tty output stream TSP writes to (process.stdout in production). */
+export interface TernOutput {
+  readonly isTTY?: boolean
+  write: (data: string) => void
 }
 
 export class TernInputMux extends PassThrough {
@@ -70,7 +82,7 @@ export class TernInputMux extends PassThrough {
   private readonly decoder = new TspInputDecoder()
   private nativeOwnership = false
 
-  constructor(private readonly source: RawReadable) {
+  constructor(private readonly source: TernInputSource) {
     super()
     this.isTTY = Boolean(source.isTTY)
     source.setEncoding('utf8')
@@ -106,7 +118,11 @@ export class TernInputMux extends PassThrough {
   private readonly onSourceData = (data: string | Buffer): void => {
     const decoded = this.decoder.push(typeof data === 'string' ? data : data.toString('utf8'))
     for (const payload of decoded.tsp) this.emit('tsp', payload)
-    if (!this.nativeOwnership && decoded.input !== '') this.write(decoded.input)
+    if (decoded.input === '') return
+    // Tern still delivers ordinary keys as pty input while it shows the native
+    // composer. Route them to that composer; Ink is suspended and must not see them.
+    if (this.nativeOwnership) this.emit('keys', decoded.input)
+    else this.write(decoded.input)
   }
 }
 
@@ -118,21 +134,24 @@ export type TernSurfaceState =
 
 type StateListener = () => void
 type EventListener = (event: TspEvent) => void
+type KeyListener = (input: string) => void
 
 export class TernTerminal {
   readonly stdin: TernInputMux
   private state: TernSurfaceState = { status: 'idle' }
   private readonly stateListeners = new Set<StateListener>()
   private readonly eventListeners = new Set<EventListener>()
+  private readonly keyListeners = new Set<KeyListener>()
   private probeTimer: NodeJS.Timeout | undefined
   private forcedRaw = false
 
   constructor(
-    source: RawReadable,
-    private readonly stdout: NodeJS.WriteStream,
+    source: TernInputSource,
+    private readonly stdout: TernOutput,
   ) {
     this.stdin = new TernInputMux(source)
     this.stdin.on('tsp', this.onTsp)
+    this.stdin.on('keys', this.onKeys)
   }
 
   readonly getSnapshot = (): TernSurfaceState => this.state
@@ -145,6 +164,11 @@ export class TernTerminal {
   readonly subscribeEvents = (listener: EventListener): (() => void) => {
     this.eventListeners.add(listener)
     return () => this.eventListeners.delete(listener)
+  }
+
+  readonly subscribeKeys = (listener: KeyListener): (() => void) => {
+    this.keyListeners.add(listener)
+    return () => this.keyListeners.delete(listener)
   }
 
   probe(): void {
@@ -170,11 +194,14 @@ export class TernTerminal {
       this.stdin.ref()
       this.stdin.setRawMode(true)
       this.forcedRaw = true
+      // Multi-line pastes must insert, not submit at the first newline.
+      this.stdout.write(BRACKETED_PASTE_ON)
     }
   }
 
   endNativeOwnership(): void {
     if (this.forcedRaw) {
+      this.stdout.write(BRACKETED_PASTE_OFF)
       this.stdin.setRawMode(false)
       this.forcedRaw = false
     }
@@ -189,9 +216,15 @@ export class TernTerminal {
     if (this.probeTimer) clearTimeout(this.probeTimer)
     this.endNativeOwnership()
     this.stdin.off('tsp', this.onTsp)
+    this.stdin.off('keys', this.onKeys)
     this.stdin.dispose()
     this.stateListeners.clear()
     this.eventListeners.clear()
+    this.keyListeners.clear()
+  }
+
+  private readonly onKeys = (input: string): void => {
+    for (const listener of this.keyListeners) listener(input)
   }
 
   private readonly onTsp = (payload: string): void => {

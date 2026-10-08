@@ -8,6 +8,7 @@ import {
   TERN_SURFACE_ID,
   TernComposerTransport,
 } from './composer.ts'
+import { applyTernComposerKey, TernComposerKeyDecoder } from './keys.ts'
 import type { TernTerminal } from './terminal.ts'
 
 export function useTernComposerSurface({
@@ -54,6 +55,7 @@ export function useTernComposerSurface({
 
     let cancelled = false
     let unsubscribe: (() => void) | undefined
+    let unsubscribeKeys: (() => void) | undefined
     let resume: (() => Promise<void>) | undefined
     const hello = surface.hello
 
@@ -75,34 +77,16 @@ export function useTernComposerSurface({
         transportRef.current = transport
         transport.start({ cursor: cursorRef.current, text: nativeTextRef.current }, true)
 
-        unsubscribe = terminal.subscribeEvents((event) => {
-          transport.handleEvent(event)
+        const applyDraft = (next: { cursor: number; text: string }): void => {
+          nativeTextRef.current = next.text
+          cursorRef.current = next.cursor
+          callbacksRef.current.onDraftChange(next.text)
+          transport.update(next, true)
+        }
 
-          if (
-            !('sf' in event) ||
-            event.sf !== TERN_SURFACE_ID ||
-            !('id' in event) ||
-            event.id !== TERN_COMPOSER_ID
-          ) {
-            return
-          }
-
-          if (event.ev === 'edit') {
-            if (sendLockedRef.current) return
-            const next = applyTernComposerEdit(nativeTextRef.current, event)
-            if (!next) return
-
-            nativeTextRef.current = next.text
-            cursorRef.current = next.cursor
-            callbacksRef.current.onDraftChange(next.text)
-            transport.update(next, true)
-            return
-          }
-
-          if (event.ev !== 'send' || sendLockedRef.current) return
-          if (event.text !== nativeTextRef.current) return
-
-          const trimmed = event.text.trim()
+        const submit = (text: string): void => {
+          if (sendLockedRef.current) return
+          const trimmed = text.trim()
           if (trimmed === '') return
 
           sendLockedRef.current = true
@@ -120,6 +104,49 @@ export function useTernComposerSurface({
             sendLockedRef.current = false
             transport.update({ cursor: cursorRef.current, text: nativeTextRef.current }, true)
           })
+        }
+
+        unsubscribe = terminal.subscribeEvents((event) => {
+          transport.handleEvent(event)
+
+          if (
+            !('sf' in event) ||
+            event.sf !== TERN_SURFACE_ID ||
+            !('id' in event) ||
+            event.id !== TERN_COMPOSER_ID
+          ) {
+            return
+          }
+
+          if (event.ev === 'edit') {
+            if (sendLockedRef.current) return
+            const next = applyTernComposerEdit(nativeTextRef.current, event)
+            if (next) applyDraft(next)
+            return
+          }
+
+          if (event.ev !== 'send') return
+          if (event.text !== nativeTextRef.current) return
+          submit(event.text)
+        })
+
+        // Ordinary typing still arrives on the pty while Tern draws the editor.
+        const keys = new TernComposerKeyDecoder()
+        unsubscribeKeys = terminal.subscribeKeys((input) => {
+          for (const key of keys.push(input)) {
+            if (key.kind === 'quit') {
+              callbacksRef.current.onQuit()
+              return
+            }
+            if (key.kind === 'submit') {
+              submit(nativeTextRef.current)
+              continue
+            }
+            if (sendLockedRef.current) continue
+            applyDraft(
+              applyTernComposerKey({ cursor: cursorRef.current, text: nativeTextRef.current }, key),
+            )
+          }
         })
       } catch {
         // TSP is an optional presentation path. Ink remains the fallback.
@@ -129,6 +156,7 @@ export function useTernComposerSurface({
     return () => {
       cancelled = true
       unsubscribe?.()
+      unsubscribeKeys?.()
       const transport = transportRef.current
       transportRef.current = null
       transport?.stop()

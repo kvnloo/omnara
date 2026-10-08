@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { applyTernComposerKey, TernComposerKeyDecoder, type TernComposerKey } from './keys.ts'
+import { applyTernComposerKey, type TernComposerKey, TernComposerKeyDecoder } from './keys.ts'
 
 const decode = (...chunks: string[]): TernComposerKey[] => {
   const decoder = new TernComposerKeyDecoder()
