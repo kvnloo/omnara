@@ -396,13 +396,7 @@ export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: Ter
         isWorking: chat.isWorking,
         hasOlderMessages: chat.hasOlderMessages,
       }),
-    [
-      chat.hasOlderMessages,
-      chat.inputBacklog.inputs,
-      chat.isWorking,
-      chat.messages,
-      chat.status,
-    ],
+    [chat.hasOlderMessages, chat.inputBacklog.inputs, chat.isWorking, chat.messages, chat.status],
   )
 
   useTernComposerSurface({

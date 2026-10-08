@@ -194,7 +194,9 @@ export function projectTernMessages(messages: readonly OmnaraUIMessage[]): reado
   return nodes
 }
 
-export function projectTernBacklog(inputs: readonly AgentInputBacklogItem[]): readonly TernLiveNode[] {
+export function projectTernBacklog(
+  inputs: readonly AgentInputBacklogItem[],
+): readonly TernLiveNode[] {
   let queued = 0
   return inputs.map((input) => {
     const state =
