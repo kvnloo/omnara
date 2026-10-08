@@ -8,16 +8,19 @@ import {
   type OmnaraUIMessage,
   useAgentChat,
   useAgentInteractions,
+  useAgents,
   useResolveAgentInteraction,
 } from '@omnara/react'
 import * as schemas from '@omnara/sdk/zod'
 import { Box, Static, Text, useApp } from 'ink'
-import { useEffect, useMemo, useReducer, useState } from 'react'
+import { useEffect, useMemo, useReducer, useState, useSyncExternalStore } from 'react'
 import * as z from 'zod'
 
 import { summaryWidth, toolCallSummary } from './agent-rendering.ts'
 import { InteractionPrompt, Label, TextInput } from './chat-prompts.tsx'
+import { supportsTernAgentSurface } from './tern/composer.ts'
 import { projectTernSession } from './tern/liveProjection.ts'
+import { projectTernSubagents } from './tern/subagentProjection.ts'
 import { useTernComposerSurface } from './tern/surface.ts'
 import type { TernTerminal } from './tern/terminal.ts'
 
@@ -365,6 +368,18 @@ export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: Ter
   const chat = useAgentChat(scope, { source: 'cli' })
   const interactions = useAgentInteractions(scope.orgID, scope.projectID, scope.agentID)
   const resolveInteraction = useResolveAgentInteraction(scope.orgID, scope.projectID, scope.agentID)
+  const ternSurface = useSyncExternalStore(
+    terminal.subscribeState,
+    terminal.getSnapshot,
+    terminal.getSnapshot,
+  )
+  const nativeAgentsEnabled =
+    ternSurface.status === 'active' && supportsTernAgentSurface(ternSurface.hello)
+  const subagents = useAgents(scope.orgID, scope.projectID, {
+    filters: { parent_agent_id: scope.agentID, include_archived: true },
+    pageSize: 100,
+    enabled: nativeAgentsEnabled,
+  })
   const { exit } = useApp()
   const [draft, setDraft] = useState('')
 
@@ -387,16 +402,30 @@ export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: Ter
   const timer = useWorkTimer(interaction != null ? 'paused' : chat.isWorking ? 'working' : 'idle')
   const lastDuration = interaction == null && !chat.isWorking ? timer.lastDuration : undefined
   const nativeEnabled = ready && interaction == null
+  const directSubagents = useMemo(
+    () => subagents.data?.pages.flatMap((page) => page.data) ?? [],
+    [subagents.data],
+  )
   const nativeMain = useMemo(
-    () =>
-      projectTernSession({
+    () => [
+      ...projectTernSession({
         messages: chat.messages,
         backlog: chat.inputBacklog.inputs,
         status: chat.status,
         isWorking: chat.isWorking,
         hasOlderMessages: chat.hasOlderMessages,
       }),
-    [chat.hasOlderMessages, chat.inputBacklog.inputs, chat.isWorking, chat.messages, chat.status],
+      ...projectTernSubagents(directSubagents, subagents.hasNextPage),
+    ],
+    [
+      chat.hasOlderMessages,
+      chat.inputBacklog.inputs,
+      chat.isWorking,
+      chat.messages,
+      chat.status,
+      directSubagents,
+      subagents.hasNextPage,
+    ],
   )
 
   useTernComposerSurface({
