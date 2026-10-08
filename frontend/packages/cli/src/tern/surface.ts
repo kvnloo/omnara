@@ -4,16 +4,20 @@ import { useEffect, useRef, useSyncExternalStore } from 'react'
 import {
   applyTernComposerEdit,
   supportsTernComposer,
+  supportsTernLiveSurface,
   TERN_COMPOSER_ID,
   TERN_SURFACE_ID,
   TernComposerTransport,
 } from './composer.ts'
 import { applyTernComposerKey, TernComposerKeyDecoder } from './keys.ts'
+import type { TernLiveNode } from './liveProjection.ts'
 import type { TernTerminal } from './terminal.ts'
 
 export function useTernComposerSurface({
   terminal,
   enabled,
+  sendable,
+  main,
   draft,
   onDraftChange,
   onQuit,
@@ -21,6 +25,8 @@ export function useTernComposerSurface({
 }: {
   terminal: TernTerminal
   enabled: boolean
+  sendable: boolean
+  main: readonly TernLiveNode[]
   draft: string
   onDraftChange: (value: string) => void
   onQuit: () => void
@@ -36,29 +42,42 @@ export function useTernComposerSurface({
   const draftRef = useRef(draft)
   const nativeTextRef = useRef(draft)
   const cursorRef = useRef(draft.length)
-  const sendLockedRef = useRef(false)
+  const sendableRef = useRef(sendable)
+  const mainRef = useRef(main)
   const transportRef = useRef<TernComposerTransport | null>(null)
 
   useEffect(() => {
     callbacksRef.current = { onDraftChange, onQuit, onSend }
     draftRef.current = draft
-  }, [draft, onDraftChange, onQuit, onSend])
+    sendableRef.current = sendable
+    mainRef.current = main
+  }, [draft, main, onDraftChange, onQuit, onSend, sendable])
 
   useEffect(() => {
     if (enabled && surface.status === 'idle') terminal.probe()
   }, [enabled, surface.status, terminal])
 
+  const liveCapable = surface.status === 'active' && supportsTernLiveSurface(surface.hello)
+  const canOwnSurface = sendable || liveCapable
+
   useEffect(() => {
-    if (!enabled || surface.status !== 'active' || !supportsTernComposer(surface.hello)) {
+    if (
+      !enabled ||
+      !canOwnSurface ||
+      surface.status !== 'active' ||
+      !supportsTernComposer(surface.hello)
+    ) {
       return
     }
 
     let cancelled = false
     const isCancelled = (): boolean => cancelled
+    let owned = false
     let unsubscribe: (() => void) | undefined
     let unsubscribeKeys: (() => void) | undefined
     let resume: (() => Promise<void>) | undefined
     const hello = surface.hello
+    const projectMain = supportsTernLiveSurface(hello)
 
     void (async () => {
       try {
@@ -69,45 +88,47 @@ export function useTernComposerSurface({
           return
         }
 
-        resume = suspension.resume
+        resume = () => suspension.resume()
         terminal.beginNativeOwnership()
+        owned = true
         nativeTextRef.current = draftRef.current
         cursorRef.current = draftRef.current.length
-        sendLockedRef.current = false
 
         const transport = new TernComposerTransport((data) => {
           terminal.write(data)
         }, hello)
         transportRef.current = transport
-        transport.start({ cursor: cursorRef.current, text: nativeTextRef.current }, true)
+        transport.start(
+          { cursor: cursorRef.current, text: nativeTextRef.current },
+          sendableRef.current,
+          projectMain ? mainRef.current : [],
+        )
+
+        const currentMain = (): readonly TernLiveNode[] => (projectMain ? mainRef.current : [])
 
         const applyDraft = (next: { cursor: number; text: string }): void => {
           nativeTextRef.current = next.text
           cursorRef.current = next.cursor
           callbacksRef.current.onDraftChange(next.text)
-          transport.update(next, true)
+          transport.update(next, sendableRef.current, currentMain())
         }
 
         const submit = (text: string): void => {
-          if (sendLockedRef.current) return
+          if (!sendableRef.current) return
           const trimmed = text.trim()
           if (trimmed === '') return
 
-          sendLockedRef.current = true
           nativeTextRef.current = ''
           cursorRef.current = 0
           callbacksRef.current.onDraftChange('')
-          transport.update({ cursor: 0, text: '' }, false)
+          transport.update({ cursor: 0, text: '' }, sendableRef.current, currentMain())
 
           if (trimmed === '/quit' || trimmed === '/exit') {
             callbacksRef.current.onQuit()
             return
           }
 
-          void callbacksRef.current.onSend(trimmed).catch(() => {
-            sendLockedRef.current = false
-            transport.update({ cursor: cursorRef.current, text: nativeTextRef.current }, true)
-          })
+          void callbacksRef.current.onSend(trimmed).catch(() => undefined)
         }
 
         unsubscribe = terminal.subscribeEvents((event) => {
@@ -123,9 +144,8 @@ export function useTernComposerSurface({
           }
 
           if (event.ev === 'edit') {
-            if (sendLockedRef.current) return
             const next = applyTernComposerEdit(nativeTextRef.current, event)
-            if (next) applyDraft(next)
+            if (next != null) applyDraft(next)
             return
           }
 
@@ -146,14 +166,13 @@ export function useTernComposerSurface({
               submit(nativeTextRef.current)
               continue
             }
-            if (sendLockedRef.current) continue
             applyDraft(
               applyTernComposerKey({ cursor: cursorRef.current, text: nativeTextRef.current }, key),
             )
           }
         })
       } catch {
-        // TSP is an optional presentation path. Ink remains the fallback.
+        // TSP is optional presentation. Existing Ink remains authoritative fallback.
       }
     })()
 
@@ -164,19 +183,25 @@ export function useTernComposerSurface({
       const transport = transportRef.current
       transportRef.current = null
       transport?.stop()
-      terminal.endNativeOwnership()
-      if (resume) void resume()
+      if (owned) terminal.endNativeOwnership()
+      if (resume != null) void resume()
     }
-  }, [enabled, surface, suspendTerminal, terminal])
+  }, [canOwnSurface, enabled, surface, suspendTerminal, terminal])
 
   useEffect(() => {
     const transport = transportRef.current
-    if (!transport || draft === nativeTextRef.current) return
-    nativeTextRef.current = draft
-    cursorRef.current = draft.length
+    if (transport == null) return
+
+    if (draft !== nativeTextRef.current) {
+      nativeTextRef.current = draft
+      cursorRef.current = draft.length
+    }
+
+    const projectMain = surface.status === 'active' && supportsTernLiveSurface(surface.hello)
     transport.update(
       { cursor: cursorRef.current, text: nativeTextRef.current },
-      !sendLockedRef.current,
+      sendable,
+      projectMain ? main : [],
     )
-  }, [draft])
+  }, [draft, main, sendable, surface])
 }

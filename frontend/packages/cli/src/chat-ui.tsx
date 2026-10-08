@@ -17,6 +17,7 @@ import * as z from 'zod'
 
 import { summaryWidth, toolCallSummary } from './agent-rendering.ts'
 import { InteractionPrompt, Label, TextInput } from './chat-prompts.tsx'
+import { projectTernSession } from './tern/liveProjection.ts'
 import { useTernComposerSurface } from './tern/surface.ts'
 import type { TernTerminal } from './tern/terminal.ts'
 
@@ -385,12 +386,30 @@ export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: Ter
     interaction == null ? currentActivity(chat.status, chat.isWorking, live) : undefined
   const timer = useWorkTimer(interaction != null ? 'paused' : chat.isWorking ? 'working' : 'idle')
   const lastDuration = interaction == null && !chat.isWorking ? timer.lastDuration : undefined
-  const nativeComposerReady =
-    ready && interaction == null && !chat.isWorking && chat.status !== 'submitted'
+  const nativeEnabled = ready && interaction == null
+  const nativeMain = useMemo(
+    () =>
+      projectTernSession({
+        messages: chat.messages,
+        backlog: chat.inputBacklog.inputs,
+        status: chat.status,
+        isWorking: chat.isWorking,
+        hasOlderMessages: chat.hasOlderMessages,
+      }),
+    [
+      chat.hasOlderMessages,
+      chat.inputBacklog.inputs,
+      chat.isWorking,
+      chat.messages,
+      chat.status,
+    ],
+  )
 
   useTernComposerSurface({
     terminal,
-    enabled: nativeComposerReady,
+    enabled: nativeEnabled,
+    sendable: nativeEnabled,
+    main: nativeMain,
     draft,
     onDraftChange: setDraft,
     onQuit: exit,
