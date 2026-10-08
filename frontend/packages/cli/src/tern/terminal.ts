@@ -75,6 +75,7 @@ export interface TernInputSource {
   setRawMode?: (enabled: boolean) => void
   ref?: () => void
   unref?: () => void
+  pause?: () => void
 }
 
 /** The slice of a tty output stream TSP writes to (process.stdout in production). */
@@ -87,6 +88,7 @@ export class TernInputMux extends PassThrough {
   readonly isTTY: boolean
   private readonly decoder = new TspInputDecoder()
   private nativeOwnership = false
+  private disposed = false
 
   constructor(private readonly source: TernInputSource) {
     super()
@@ -95,13 +97,15 @@ export class TernInputMux extends PassThrough {
     source.on('data', this.onSourceData)
   }
 
+  // After dispose the real tty is released; late calls (Ink resuming its
+  // suspended input while it unmounts) must not grab it again.
   setRawMode(enabled: boolean): this {
-    this.source.setRawMode?.(enabled)
+    if (!this.disposed) this.source.setRawMode?.(enabled)
     return this
   }
 
   ref(): this {
-    this.source.ref?.()
+    if (!this.disposed) this.source.ref?.()
     return this
   }
 
@@ -115,10 +119,16 @@ export class TernInputMux extends PassThrough {
   }
 
   dispose(): void {
+    if (this.disposed) return
     this.source.off('data', this.onSourceData)
     const tail = this.decoder.flush()
     if (!this.nativeOwnership && tail !== '') this.write(tail)
     this.end()
+    // Hand the tty back cooked and released so the process can exit.
+    this.source.setRawMode?.(false)
+    this.source.pause?.()
+    this.source.unref?.()
+    this.disposed = true
   }
 
   private readonly onSourceData = (data: string | Buffer): void => {
