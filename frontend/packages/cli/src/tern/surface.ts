@@ -32,12 +32,16 @@ export function useTernComposerSurface({
     terminal.getSnapshot,
   )
   const callbacksRef = useRef({ onDraftChange, onQuit, onSend })
+  const draftRef = useRef(draft)
   const nativeTextRef = useRef(draft)
   const cursorRef = useRef(draft.length)
   const sendLockedRef = useRef(false)
   const transportRef = useRef<TernComposerTransport | null>(null)
 
-  callbacksRef.current = { onDraftChange, onQuit, onSend }
+  useEffect(() => {
+    callbacksRef.current = { onDraftChange, onQuit, onSend }
+    draftRef.current = draft
+  }, [draft, onDraftChange, onQuit, onSend])
 
   useEffect(() => {
     if (enabled && surface.status === 'idle') terminal.probe()
@@ -67,8 +71,8 @@ export function useTernComposerSurface({
 
         resume = suspension.resume
         terminal.beginNativeOwnership()
-        nativeTextRef.current = draft
-        cursorRef.current = draft.length
+        nativeTextRef.current = draftRef.current
+        cursorRef.current = draftRef.current.length
         sendLockedRef.current = false
 
         const transport = new TernComposerTransport((data) => terminal.write(data), hello)
