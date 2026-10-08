@@ -16,7 +16,7 @@ import { useEffect, useMemo, useReducer, useState } from 'react'
 import * as z from 'zod'
 
 import { summaryWidth, toolCallSummary } from './agent-rendering.ts'
-import { InteractionPrompt, Label, TextInput } from './chat-prompts.tsx'
+import { InteractionPrompt, Label, TextInput } from './chat-prompts.tsx'\nimport { useTernComposerSurface } from './tern/surface.ts'\nimport type { TernTerminal } from './tern/terminal.ts'
 
 type MessagePart = OmnaraUIMessage['parts'][number]
 type ToolPart = Extract<MessagePart, { type: 'dynamic-tool' }>
@@ -358,7 +358,7 @@ function Transcript({ items, live }: { items: TranscriptItem[]; live: OmnaraUIMe
   )
 }
 
-export function Chat({ scope }: { scope: AgentChatScope }) {
+export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: TernTerminal }) {
   const chat = useAgentChat(scope, { source: 'cli' })
   const interactions = useAgentInteractions(scope.orgID, scope.projectID, scope.agentID)
   const resolveInteraction = useResolveAgentInteraction(scope.orgID, scope.projectID, scope.agentID)
