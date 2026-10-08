@@ -383,6 +383,19 @@ export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: Ter
     interaction == null ? currentActivity(chat.status, chat.isWorking, live) : undefined
   const timer = useWorkTimer(interaction != null ? 'paused' : chat.isWorking ? 'working' : 'idle')
   const lastDuration = interaction == null && !chat.isWorking ? timer.lastDuration : undefined
+  const nativeComposerReady =
+    ready && interaction == null && !chat.isWorking && chat.status !== 'submitted'
+
+  useTernComposerSurface({
+    terminal,
+    enabled: nativeComposerReady,
+    draft,
+    onDraftChange: setDraft,
+    onQuit: exit,
+    onSend: async (text) => {
+      await chat.sendMessage({ text })
+    },
+  })
 
   return (
     <Box flexDirection="column">
