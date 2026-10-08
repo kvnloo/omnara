@@ -27,6 +27,8 @@ const zToolOutput = z.object({
   contentBlocks: z.array(schemas.zToolResultContentBlock),
 })
 
+const zTextPair = z.tuple([z.string(), z.string()])
+
 const clip = (value: string, max = 4096): string =>
   value.length <= max ? value : `${value.slice(0, max)}…`
 
@@ -36,19 +38,25 @@ const stableMessageId = (message: Pick<OmnaraUIMessage, 'id'>): string =>
 const stablePartId = (message: OmnaraUIMessage, part: MessagePart): string =>
   `${stableMessageId(message)}:part:${part.id}`
 
-function jsonText(value: unknown): string | undefined {
+function toolInputText(part: ToolPart): string | undefined {
+  if (part.input === undefined) return undefined
   try {
-    const text = JSON.stringify(value, null, 2)
-    return text == null || text === '{}' ? undefined : clip(text)
+    const text = JSON.stringify(part.input, null, 2)
+    return text === '{}' ? undefined : clip(text)
   } catch {
     return undefined
   }
 }
 
+function withChildren(node: TernLiveNode, children: readonly TernLiveNode[]): TernLiveNode {
+  if (children.length > 0) node.c = children
+  return node
+}
+
 function toolNode(part: ToolPart): TernLiveNode {
-  const id = `omnara:tool:${part.toolCallId ?? part.id}`
+  const id = `omnara:tool:${part.toolCallId}`
   const children: TernLiveNode[] = []
-  const input = jsonText(part.input)
+  const input = toolInputText(part)
   if (input != null) {
     children.push({
       id: `${id}:input`,
@@ -65,18 +73,20 @@ function toolNode(part: ToolPart): TernLiveNode {
         p: { text: clip(part.errorText), tone: 'error' },
       })
     }
-    return {
-      id,
-      k: 'tool',
-      p: {
-        name: part.toolName,
-        title: part.toolName,
-        status: 'error',
-        collapsible: true,
-        collapsed: false,
+    return withChildren(
+      {
+        id,
+        k: 'tool',
+        p: {
+          name: part.toolName,
+          title: part.toolName,
+          status: 'error',
+          collapsible: true,
+          collapsed: false,
+        },
       },
-      ...(children.length > 0 ? { c: children } : {}),
-    }
+      children,
+    )
   }
 
   if (part.state === 'output-available') {
@@ -103,33 +113,37 @@ function toolNode(part: ToolPart): TernLiveNode {
           : parsed.data.outcome === 'canceled'
             ? 'cancelled'
             : 'error'
-      return {
-        id,
-        k: 'tool',
-        p: {
-          name: part.toolName,
-          title: part.toolName,
-          status,
-          collapsible: true,
-          collapsed: status === 'done',
+      return withChildren(
+        {
+          id,
+          k: 'tool',
+          p: {
+            name: part.toolName,
+            title: part.toolName,
+            status,
+            collapsible: true,
+            collapsed: status === 'done',
+          },
         },
-        ...(children.length > 0 ? { c: children } : {}),
-      }
+        children,
+      )
     }
   }
 
-  return {
-    id,
-    k: 'tool',
-    p: {
-      name: part.toolName,
-      title: part.toolName,
-      status: 'running',
-      collapsible: true,
-      collapsed: false,
+  return withChildren(
+    {
+      id,
+      k: 'tool',
+      p: {
+        name: part.toolName,
+        title: part.toolName,
+        status: 'running',
+        collapsible: true,
+        collapsed: false,
+      },
     },
-    ...(children.length > 0 ? { c: children } : {}),
-  }
+    children,
+  )
 }
 
 function userNode(message: OmnaraUIMessage): TernLiveNode | null {
@@ -271,9 +285,10 @@ export function reconcileTernLiveNodes(
     if (!nextIds.has(old.id)) ops.push(['del', old.id])
   }
 
-  for (let index = next.length - 1; index >= 0; index -= 1) {
-    const node = next[index]!
-    const before = next[index + 1]?.id ?? null
+  const backwards = next
+    .map((node, index) => ({ node, before: next[index + 1]?.id ?? null }))
+    .reverse()
+  for (const { node, before } of backwards) {
     const old = oldById.get(node.id)
 
     if (old == null || old.k !== node.k) {
@@ -305,13 +320,15 @@ export function reconcileTernLiveNodes(
       const nextValue = props[key]
       if (sameLiveValue(beforeValue, nextValue)) continue
 
-      if (key === 'text' && typeof beforeValue === 'string' && typeof nextValue === 'string') {
-        const append = nextValue.startsWith(beforeValue)
+      const textPair = key === 'text' ? zTextPair.safeParse([beforeValue, nextValue]) : null
+      if (textPair?.success === true) {
+        const [beforeText, nextText] = textPair.data
+        const append = nextText.startsWith(beforeText)
         ops.push([
           'text',
           node.id,
           append ? 'append' : 'replace',
-          append ? nextValue.slice(beforeValue.length) : nextValue,
+          append ? nextText.slice(beforeText.length) : nextText,
         ])
       } else {
         patch[key] = nextValue ?? null

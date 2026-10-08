@@ -1,3 +1,4 @@
+import { reconcileTernLiveNodes, type TernLiveNode } from './liveProjection.ts'
 import {
   encodeTspJson,
   OMNARA_TSP_PROGRAM_FEATURES,
@@ -5,7 +6,6 @@ import {
   type TspHello,
   type TspJson,
 } from './protocol.ts'
-import { reconcileTernLiveNodes, type TernLiveNode } from './liveProjection.ts'
 
 export const TERN_SURFACE_ID = 'omnara:session'
 export const TERN_COMPOSER_ID = 'omnara:composer'
