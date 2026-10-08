@@ -26,9 +26,7 @@ export function projectTernSubagents(
     const status = statusOf(agent)
     const name = agent.name.trim() || agent.subagent_key || agent.id
     const model =
-      agent.model == null
-        ? undefined
-        : `${agent.model.provider_config}/${agent.model.name}`
+      agent.model == null ? undefined : `${agent.model.provider_config}/${agent.model.name}`
 
     return {
       id: `omnara:agent:${agent.id}`,
