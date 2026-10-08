@@ -45,7 +45,7 @@ function jsonText(value: unknown): string | undefined {
   }
 }
 
-function toolNode(message: OmnaraUIMessage, part: ToolPart): TernLiveNode {
+function toolNode(part: ToolPart): TernLiveNode {
   const id = `omnara:tool:${part.toolCallId ?? part.id}`
   const children: TernLiveNode[] = []
   const input = jsonText(part.input)
@@ -160,7 +160,7 @@ function assistantNodes(message: OmnaraUIMessage): TernLiveNode[] {
     if (part.type === 'text' && part.text.trim() !== '') {
       nodes.push({ id, k: 'md', p: { text: part.text } })
     } else if (part.type === 'dynamic-tool') {
-      nodes.push(toolNode(message, part))
+      nodes.push(toolNode(part))
     } else if (part.type === 'data-model-error') {
       nodes.push({ id, k: 'text', p: { text: part.data.text, tone: 'error' } })
     } else if (part.type === 'data-agent-config') {
