@@ -1,8 +1,18 @@
 import type { Agent } from '@omnara/sdk'
 
 import type { TernLiveNode } from './liveProjection.ts'
+import type { TspJsonObject } from './protocol.ts'
 
 type TernAgentStatus = 'running' | 'idle' | 'parked'
+
+interface TernAgentProps extends TspJsonObject {
+  name: string
+  status?: TernAgentStatus
+  model?: string
+  depth: number
+  collapsible: boolean
+  collapsed: boolean
+}
 
 function statusOf(agent: Agent): TernAgentStatus | undefined {
   if (agent.state === 'archived' || agent.activity?.state === 'archived') return 'parked'
@@ -18,28 +28,29 @@ function statusOf(agent: Agent): TernAgentStatus | undefined {
   }
 }
 
+function displayName(agent: Agent): string {
+  const name = agent.name.trim()
+  if (name !== '') return name
+  if (agent.subagent_key != null && agent.subagent_key !== '') return agent.subagent_key
+  return agent.id
+}
+
 export function projectTernSubagents(
   agents: readonly Agent[],
   truncated = false,
 ): readonly TernLiveNode[] {
   const nodes: TernLiveNode[] = agents.map((agent) => {
     const status = statusOf(agent)
-    const name = agent.name.trim() || agent.subagent_key || agent.id
-    const model =
-      agent.model == null ? undefined : `${agent.model.provider_config}/${agent.model.name}`
-
-    return {
-      id: `omnara:agent:${agent.id}`,
-      k: 'agent',
-      p: {
-        name,
-        ...(status == null ? {} : { status }),
-        ...(model == null ? {} : { model }),
-        depth: 1,
-        collapsible: true,
-        collapsed: true,
-      },
+    const props: TernAgentProps = {
+      name: displayName(agent),
+      depth: 1,
+      collapsible: true,
+      collapsed: true,
     }
+    if (status != null) props.status = status
+    if (agent.model != null) props.model = `${agent.model.provider_config}/${agent.model.name}`
+
+    return { id: `omnara:agent:${agent.id}`, k: 'agent', p: props }
   })
 
   if (truncated) {
