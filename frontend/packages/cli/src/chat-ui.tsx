@@ -16,7 +16,9 @@ import { useEffect, useMemo, useReducer, useState } from 'react'
 import * as z from 'zod'
 
 import { summaryWidth, toolCallSummary } from './agent-rendering.ts'
-import { InteractionPrompt, Label, TextInput } from './chat-prompts.tsx'\nimport { useTernComposerSurface } from './tern/surface.ts'\nimport type { TernTerminal } from './tern/terminal.ts'
+import { InteractionPrompt, Label, TextInput } from './chat-prompts.tsx'
+import { useTernComposerSurface } from './tern/surface.ts'
+import type { TernTerminal } from './tern/terminal.ts'
 
 type MessagePart = OmnaraUIMessage['parts'][number]
 type ToolPart = Extract<MessagePart, { type: 'dynamic-tool' }>
