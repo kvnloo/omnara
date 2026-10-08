@@ -15,7 +15,7 @@ export async function runChat(client: OmnaraClient, scope: AgentChatScope): Prom
         <Chat scope={scope} terminal={terminal} />
       </OmnaraClientProvider>
     </QueryClientProvider>,
-    { stdin: terminal.stdin as NodeJS.ReadStream },
+    { stdin: terminal.inkStdin() },
   )
   try {
     await app.waitUntilExit()

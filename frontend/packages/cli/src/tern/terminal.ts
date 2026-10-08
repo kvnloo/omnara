@@ -1,4 +1,4 @@
-import { PassThrough } from 'node:stream'
+import { type Duplex, PassThrough } from 'node:stream'
 
 import {
   decodeTspEvent,
@@ -152,6 +152,15 @@ export class TernTerminal {
     this.stdin = new TernInputMux(source)
     this.stdin.on('tsp', this.onTsp)
     this.stdin.on('keys', this.onKeys)
+  }
+
+  /** The mux as Ink's `render({ stdin })` option. */
+  inkStdin(): NodeJS.ReadStream {
+    const stream: Duplex = this.stdin
+    // SAFETY: Ink 7 reads stdin only through isTTY, setEncoding, setRawMode,
+    // ref/unref, read/unshift and listeners; TernInputMux (a PassThrough that
+    // forwards raw mode and ref/unref to the real tty) implements all of them.
+    return stream as NodeJS.ReadStream
   }
 
   readonly getSnapshot = (): TernSurfaceState => this.state
