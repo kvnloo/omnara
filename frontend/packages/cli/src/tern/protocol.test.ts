@@ -3,7 +3,7 @@ import { decodeTspHello, decodeTspEvent, encodeTspHelloQuery, parseTspApc } from
 import { applyTernComposerEdit, TERN_COMPOSER_ID, TERN_SURFACE_ID, TernComposerTransport } from './composer.ts'
 
 describe('Omnara TSP protocol',()=>{
-  it('identifies Omnara and requests edit/send',()=>{const q=parseTspApc(encodeTspHelloQuery());expect(q?.verb).toBe('q');expect(JSON.parse(q!.body)).toMatchObject({app:'omnara',features:['edit','send']})})
+  it('identifies Omnara and requests edit/send',()=>{const wire=encodeTspHelloQuery();const q=parseTspApc(wire.slice(2,-2));expect(q?.verb).toBe('q');expect(JSON.parse(q!.body)).toMatchObject({app:'omnara',features:['edit','send']})})
   it('decodes hello and rejects malformed events',()=>{expect(decodeTspHello('tsp;r;'+JSON.stringify({r:'hello',v:1,term:'tern',kinds:['col','editor'],credits:1}))?.term).toBe('tern');expect(decodeTspEvent('tsp;e;{}')).toBeNull()})
 })
 describe('composer parity',()=>{
