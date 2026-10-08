@@ -141,7 +141,7 @@ export function useTernComposerSurface({
       terminal.endNativeOwnership()
       if (resume) void resume()
     }
-  }, [draft, enabled, surface, suspendTerminal, terminal])
+  }, [enabled, surface, suspendTerminal, terminal])
 
   useEffect(() => {
     const transport = transportRef.current
