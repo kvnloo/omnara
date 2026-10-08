@@ -7,19 +7,17 @@ import {
   reconcileTernLiveNodes,
 } from './liveProjection.ts'
 
-const user = (text: string): OmnaraUIMessage =>
-  ({
-    id: 'evt-1',
-    role: 'user',
-    parts: [{ id: 'evt-1:block:0', type: 'text', text, state: 'done' }],
-  }) as OmnaraUIMessage
+const user = (text: string): OmnaraUIMessage => ({
+  id: 'evt-1',
+  role: 'user',
+  parts: [{ id: 'evt-1:block:0', type: 'text', text, state: 'done' }],
+})
 
-const assistant = (text: string): OmnaraUIMessage =>
-  ({
-    id: 'turn:t-1',
-    role: 'assistant',
-    parts: [{ id: 'call-1:block:0', type: 'text', text, state: 'streaming' }],
-  }) as OmnaraUIMessage
+const assistant = (text: string): OmnaraUIMessage => ({
+  id: 'turn:t-1',
+  role: 'assistant',
+  parts: [{ id: 'call-1:block:0', type: 'text', text, state: 'streaming' }],
+})
 
 describe('native live projection', () => {
   it('uses Omnara message and part ids as stable native identity', () => {
@@ -41,25 +39,23 @@ describe('native live projection', () => {
   })
 
   it('keeps a tool id stable from running to terminal state', () => {
-    const running = {
+    const tool = {
+      id: 'ctx:block:0',
+      type: 'dynamic-tool',
+      toolCallId: 'tool-7',
+      toolName: 'read_file',
+      input: { path: 'README.md' },
+    } as const
+    const running: OmnaraUIMessage = {
       id: 'turn:t-1',
       role: 'assistant',
-      parts: [
-        {
-          id: 'ctx:block:0',
-          type: 'dynamic-tool',
-          toolCallId: 'tool-7',
-          toolName: 'read_file',
-          state: 'input-available',
-          input: { path: 'README.md' },
-        },
-      ],
-    } as OmnaraUIMessage
-    const done = {
+      parts: [{ ...tool, state: 'input-available' }],
+    }
+    const done: OmnaraUIMessage = {
       ...running,
       parts: [
         {
-          ...running.parts[0],
+          ...tool,
           state: 'output-available',
           output: {
             outcome: 'succeeded',
@@ -67,7 +63,7 @@ describe('native live projection', () => {
           },
         },
       ],
-    } as OmnaraUIMessage
+    }
 
     const before = projectTernMessages([running])
     const after = projectTernMessages([done])
