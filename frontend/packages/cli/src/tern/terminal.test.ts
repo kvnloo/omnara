@@ -54,3 +54,38 @@ describe('native ownership input routing', () => {
     terminal.dispose()
   })
 })
+
+class RawTtyInput extends PassThrough {
+  readonly isTTY = true
+  isRaw = false
+  refs = 0
+  setRawMode(enabled: boolean): void {
+    this.isRaw = enabled
+  }
+  ref(): void {
+    this.refs += 1
+  }
+  unref(): void {
+    this.refs = 0
+  }
+}
+
+describe('terminal restore on exit', () => {
+  it('leaves the tty cooked, paused and unref’d after quitting from native ownership', () => {
+    const source = new RawTtyInput()
+    const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
+    terminal.stdin.on('data', () => undefined)
+    terminal.beginNativeOwnership()
+    // Ink resumes its suspended input while it unmounts, re-enabling raw mode.
+    terminal.stdin.setRawMode(true)
+    terminal.stdin.ref()
+
+    terminal.dispose()
+    terminal.stdin.setRawMode(true)
+    terminal.stdin.ref()
+
+    expect(source.isRaw).toBe(false)
+    expect(source.isPaused()).toBe(true)
+    expect(source.refs).toBe(0)
+  })
+})
