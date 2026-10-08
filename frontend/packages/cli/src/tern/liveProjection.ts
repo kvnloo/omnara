@@ -8,14 +8,16 @@ import {
 import * as schemas from '@omnara/sdk/zod'
 import * as z from 'zod'
 
-export interface TernLiveNode {
+import type { TspJson, TspJsonObject } from './protocol.ts'
+
+export interface TernLiveNode extends TspJsonObject {
   id: string
   k: string
-  p?: Record<string, unknown>
+  p?: TspJsonObject
   c?: readonly TernLiveNode[]
 }
 
-export type TernLiveOp = readonly unknown[]
+export type TernLiveOp = readonly TspJson[]
 
 type MessagePart = OmnaraUIMessage['parts'][number]
 type ToolPart = Extract<MessagePart, { type: 'dynamic-tool' }>
@@ -252,7 +254,7 @@ export function projectTernSession({
   return nodes
 }
 
-const sameLiveValue = (left: unknown, right: unknown): boolean =>
+const sameLiveValue = (left: TspJson | undefined, right: TspJson | undefined): boolean =>
   left === right || JSON.stringify(left) === JSON.stringify(right)
 
 export function reconcileTernLiveNodes(
@@ -296,7 +298,7 @@ export function reconcileTernLiveNodes(
 
     const oldProps = old.p ?? {}
     const props = node.p ?? {}
-    const patch: Record<string, unknown> = {}
+    const patch: Record<string, TspJson> = {}
 
     for (const key of new Set([...Object.keys(oldProps), ...Object.keys(props)])) {
       const beforeValue = oldProps[key]

@@ -3,6 +3,7 @@ import {
   OMNARA_TSP_PROGRAM_FEATURES,
   type TspEvent,
   type TspHello,
+  type TspJson,
 } from './protocol.ts'
 import { reconcileTernLiveNodes, type TernLiveNode } from './liveProjection.ts'
 
@@ -130,7 +131,7 @@ export class TernComposerTransport {
       return
     }
 
-    const ops: unknown[] = []
+    const ops: TspJson[] = []
     if (
       next.text !== this.last.text ||
       next.cursor !== this.last.cursor ||
@@ -163,7 +164,7 @@ export class TernComposerTransport {
     this.write(encodeTspJson('x', { id: TERN_SURFACE_ID, keep: false }, this.limit))
   }
 
-  private ops(ops: unknown[]): void {
+  private ops(ops: TspJson[]): void {
     this.seq += 1
     this.write(encodeTspJson('f', { ops, s: this.seq, sf: TERN_SURFACE_ID }, this.limit))
   }
