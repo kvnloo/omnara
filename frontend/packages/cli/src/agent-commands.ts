@@ -5,6 +5,7 @@ import * as z from 'zod'
 import { runChat } from './chat.tsx'
 import { customOp, parseNumberFlag, parseWithSchema } from './factory.ts'
 import { canPromptInteractively, promptAgentSelection } from './interactive.ts'
+import { runOmpBridge } from './omp-bridge.ts'
 import { CliInputError } from './output.ts'
 
 export const agentChatOp = customOp({
@@ -52,5 +53,18 @@ export const agentEventsStreamOp = customOp({
       signal: abort.signal,
     })
     for await (const frame of frames) console.log(JSON.stringify(frame))
+  },
+})
+
+export const agentOmpBridgeOp = customOp({
+  verb: 'bridge-omp',
+  summary: 'Expose an agent over the experimental OMP renderer bridge',
+  path: schemas.zListAgentsPath,
+  configure: (command) => {
+    command.argument('<agent-id>')
+  },
+  run: async ({ client, path, args }) => {
+    const agentID = parseWithSchema(schemas.zAgentId, args[0], 'agent id')
+    await runOmpBridge(client, { ...path, agentID })
   },
 })
