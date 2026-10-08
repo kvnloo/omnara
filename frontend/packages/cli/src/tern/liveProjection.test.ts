@@ -79,12 +79,15 @@ describe('native live projection', () => {
   })
 
   it('uses durable backlog ids', () => {
-    const input = {
+    const input: AgentInputBacklogItem = {
       id: 'input-9',
+      agent_id: 'agent-1',
+      state: 'queued',
       delivery_mode: 'queued',
-      text: 'follow up',
-      attachmentCount: 0,
-    } as AgentInputBacklogItem
+      input_kind: 'content',
+      content_blocks: [{ type: 'text', text: 'follow up' }],
+      queued_at: '2026-10-08T00:00:00Z',
+    }
     expect(projectTernBacklog([input])[0]?.id).toBe('omnara:backlog:input-9')
   })
 })
