@@ -48,11 +48,7 @@ export function useTernComposerSurface({
   }, [enabled, surface.status, terminal])
 
   useEffect(() => {
-    if (
-      !enabled ||
-      surface.status !== 'active' ||
-      !supportsTernComposer(surface.hello)
-    ) {
+    if (!enabled || surface.status !== 'active' || !supportsTernComposer(surface.hello)) {
       return
     }
 
@@ -77,10 +73,7 @@ export function useTernComposerSurface({
 
         const transport = new TernComposerTransport((data) => terminal.write(data), hello)
         transportRef.current = transport
-        transport.start(
-          { cursor: cursorRef.current, text: nativeTextRef.current },
-          true,
-        )
+        transport.start({ cursor: cursorRef.current, text: nativeTextRef.current }, true)
 
         unsubscribe = terminal.subscribeEvents((event) => {
           transport.handleEvent(event)
@@ -125,10 +118,7 @@ export function useTernComposerSurface({
 
           void callbacksRef.current.onSend(trimmed).catch(() => {
             sendLockedRef.current = false
-            transport.update(
-              { cursor: cursorRef.current, text: nativeTextRef.current },
-              true,
-            )
+            transport.update({ cursor: cursorRef.current, text: nativeTextRef.current }, true)
           })
         })
       } catch {

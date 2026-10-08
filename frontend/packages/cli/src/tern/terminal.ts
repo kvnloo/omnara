@@ -1,6 +1,13 @@
 import { PassThrough } from 'node:stream'
 
-import { decodeTspEvent, decodeTspHello, encodeTspHelloQuery, TSP_VERSION, type TspEvent, type TspHello } from './protocol.ts'
+import {
+  decodeTspEvent,
+  decodeTspHello,
+  encodeTspHelloQuery,
+  TSP_VERSION,
+  type TspEvent,
+  type TspHello,
+} from './protocol.ts'
 
 const TSP_START = '\x1b_tsp;'
 const ST = '\x1b\\'
@@ -120,7 +127,10 @@ export class TernTerminal {
   private probeTimer: NodeJS.Timeout | undefined
   private forcedRaw = false
 
-  constructor(source: RawReadable, private readonly stdout: NodeJS.WriteStream) {
+  constructor(
+    source: RawReadable,
+    private readonly stdout: NodeJS.WriteStream,
+  ) {
     this.stdin = new TernInputMux(source)
     this.stdin.on('tsp', this.onTsp)
   }
