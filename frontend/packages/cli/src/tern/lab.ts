@@ -61,6 +61,10 @@ const streams = new Set<ServerResponse>()
 let interaction: z.infer<typeof schemas.zAgentInteraction> | undefined
 let sequence = 0
 let turn = 0
+// Captured at the real SDK HTTP boundary, not from a simulated TSP send event.
+const sdkPosts: string[] = []
+let interactionsOpened = 0
+let interactionsResolved = 0
 const responseTimers = new Set<ReturnType<typeof setTimeout>>()
 
 function json(res: ServerResponse, status: number, payload: string | undefined): void {
@@ -189,6 +193,10 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
         .filter((block) => block.type === 'text' && block.metadata?.omnara_hidden !== 'true')
         .map((block) => (block.type === 'text' ? block.text : ''))
         .join('\n')
+      sdkPosts.push(text)
+      if (process.argv.includes('--trace-sdk')) {
+        process.stderr.write('Omnara lab SDK POST text: ' + JSON.stringify(text) + '\n')
+      }
       const inputID = fixtureId('ain', turn + 1)
       const createdAt = timestamp()
       const storedBlocks = blocks.filter((block) => block.type === 'text')
@@ -225,6 +233,7 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
       )
       json(res, 201, JSON.stringify({ agent_input: input }))
       if (text.trim().startsWith('/ask')) {
+        interactionsOpened += 1
         interaction = schemas.zAgentInteraction.parse({
           id: fixtureId('int', currentTurn),
           org_id: scope.orgID,
@@ -285,6 +294,7 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
         resolved_at: timestamp(),
       })
       interaction = resolved
+      interactionsResolved += 1
       json(res, 200, JSON.stringify(resolved))
       broadcast(
         JSON.stringify({
@@ -347,6 +357,22 @@ async function main(): Promise<void> {
       scope,
       resolveTernPresentation({ ternLive: process.argv.includes('--tern-live') }),
     )
+    // runChat must release its native PTY ownership even on a /quit path.
+    if (process.stdin.isRaw) throw new Error('runChat left the TTY in raw mode')
+    if (process.argv.includes('--assert-ask')) {
+      const exact = sdkPosts.filter((text) => text === '/ask').length
+      const truncated = sdkPosts.filter((text) => text === '/').length
+      if (exact !== 1 || truncated !== 0 || interactionsOpened !== 1 ||
+          interactionsResolved !== 1) {
+        throw new Error(
+          'Native /ask proof failed: exact=' + String(exact) +
+            ', truncated=' + String(truncated) +
+            ', opened=' + String(interactionsOpened) +
+            ', resolved=' + String(interactionsResolved),
+        )
+      }
+      process.stderr.write('Native /ask proof: one exact SDK POST, interaction opened and resolved; TTY cooked.\n')
+    }
   } finally {
     for (const timer of responseTimers) clearTimeout(timer)
     responseTimers.clear()
