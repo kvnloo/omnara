@@ -116,21 +116,29 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
       return
     }
     if (req.method === 'GET' && path === root) {
-      json(res, 200, JSON.stringify({
-        data: url.searchParams.has('parent_agent_id') ? [childAgent] : [agent],
-        next_cursor: null,
-      }))
+      json(
+        res,
+        200,
+        JSON.stringify({
+          data: url.searchParams.has('parent_agent_id') ? [childAgent] : [agent],
+          next_cursor: null,
+        }),
+      )
       return
     }
     if (req.method === 'GET' && path === agentPath + '/events') {
       const before = Number(url.searchParams.get('before_sequence') ?? '0')
       const page = before > 0 ? events.filter((event) => event.sequence < before) : events
-      json(res, 200, JSON.stringify({
-        data: page.slice(-100).map((event) => schemas.zAgentEvent.parse(JSON.parse(event.payload))),
-        next_after_sequence: sequence,
-        next_before_sequence: null,
-        has_more: false,
-      }))
+      json(
+        res,
+        200,
+        JSON.stringify({
+          data: page.slice(-100).map((event) => schemas.zAgentEvent.parse(JSON.parse(event.payload))),
+          next_after_sequence: sequence,
+          next_before_sequence: null,
+          has_more: false,
+        }),
+      )
       return
     }
     if (req.method === 'GET' && path === agentPath + '/events/stream') {
@@ -158,7 +166,14 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
       return
     }
     if (req.method === 'GET' && path === agentPath + '/interactions') {
-      json(res, 200, JSON.stringify({ data: interaction?.state === 'open' ? [interaction] : [], next_cursor: null }))
+      json(
+        res,
+        200,
+        JSON.stringify({
+          data: interaction?.state === 'open' ? [interaction] : [],
+          next_cursor: null,
+        }),
+      )
       return
     }
     if (req.method === 'POST' && path === agentPath + '/inputs') {
@@ -214,7 +229,10 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
           request: {
             title: 'Loopback approval simulation',
             questions: [
-              { prompt: 'Continue the fixture turn?', options: [{ label: 'Yes' }, { label: 'No' }] },
+              {
+                prompt: 'Continue the fixture turn?',
+                options: [{ label: 'Yes' }, { label: 'No' }],
+              },
             ],
           },
           created_at: timestamp(),
@@ -240,9 +258,15 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
       interaction != null &&
       path === agentPath + '/interactions/' + interaction.id + '/resolve'
     ) {
-      const parsed = schemas.zResolveAgentInteractionBody.safeParse(JSON.parse(await requestBody(req)))
+      const parsed = schemas.zResolveAgentInteractionBody.safeParse(
+        JSON.parse(await requestBody(req)),
+      )
       if (!parsed.success) {
-        json(res, 400, JSON.stringify({ error: 'Invalid interaction answers', code: 'invalid_argument' }))
+        json(
+          res,
+          400,
+          JSON.stringify({ error: 'Invalid interaction answers', code: 'invalid_argument' }),
+        )
         return
       }
       const resolved = schemas.zAgentInteraction.parse({
@@ -266,10 +290,14 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
   } catch (error) {
     if (res.headersSent) res.destroy(error instanceof Error ? error : undefined)
     else {
-      json(res, error instanceof RangeError ? 413 : 400, JSON.stringify({
-        error: 'Invalid fixture request',
-        code: 'invalid_argument',
-      }))
+      json(
+        res,
+        error instanceof RangeError ? 413 : 400,
+        JSON.stringify({
+          error: 'Invalid fixture request',
+          code: 'invalid_argument',
+        }),
+      )
     }
   }
 }
@@ -293,7 +321,8 @@ async function main(): Promise<void> {
   if (!isTcpAddress(address)) throw new Error('Fixture port unavailable')
   const baseUrl = `http://127.0.0.1:${address.port}/v1`
   process.stderr.write(
-    'Omnara/Tern loopback fixture at ' + baseUrl +
+    'Omnara/Tern loopback fixture at ' +
+      baseUrl +
       ' (local only; no credentials or model calls)\n',
   )
   process.stderr.write(
