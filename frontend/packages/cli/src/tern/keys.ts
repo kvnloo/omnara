@@ -102,9 +102,10 @@ export class TernComposerKeyDecoder {
           continue
         }
         // A lone escape, SS3 function key or meta chord: the Ink composer ignores these.
-        rest = rest.slice(
-          rest.startsWith('\x1bO') ? 3 : rest[1] === ESC ? 1 : Math.min(2, rest.length),
-        )
+        let consumed = Math.min(2, rest.length)
+        if (rest.startsWith('\x1bO')) consumed = 3
+        else if (rest[1] === ESC) consumed = 1
+        rest = rest.slice(consumed)
         continue
       }
 
