@@ -318,9 +318,9 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     try {
       await activate(fixture)
       fixture.source.write('local draft')
-      fixture.source.write(send('  external 🌿\\n世界  '))
+      fixture.source.write(send('  external 🌿\n世界  '))
       await vi.waitFor(() => {
-        expect(sent).toEqual(['  external 🌿\\n世界  '])
+        expect(sent).toEqual(['  external 🌿\n世界  '])
       })
     } finally {
       fixture.dispose()
@@ -342,7 +342,7 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       fixture.source.write(send(''))
       fixture.source.write(send('   '))
       expect(sent).toEqual([])
-      fixture.source.write('\\r')
+      fixture.source.write('\r')
       await vi.waitFor(() => {
         expect(sent).toEqual(['unsent locally'])
       })
@@ -364,7 +364,7 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       fixture.rerender(mode)
       fixture.source.write('sk' + event({ ev: 'theme', dark: false }))
       fixture.rerender(mode)
-      fixture.source.write('\\r')
+      fixture.source.write('\r')
       await vi.waitFor(() => {
         expect(sent).toEqual(['/ask'])
       })
