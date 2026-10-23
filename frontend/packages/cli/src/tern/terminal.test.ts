@@ -117,3 +117,26 @@ describe('terminal native safety fallback', () => {
     terminal.dispose()
   })
 })
+
+describe('ordinary terminal compatibility', () => {
+  it('never claims native ownership without TTY capability', () => {
+    const source = new PassThrough()
+    const terminal = new TernTerminal(source, { isTTY: false, write: () => undefined })
+    const keys: string[] = []
+    terminal.stdin.on('data', (chunk: Buffer) => keys.push(chunk.toString()))
+    terminal.probe()
+    expect(terminal.getSnapshot().status).toBe('unsupported')
+    source.write('regular ink typing')
+    expect(keys.join('')).toBe('regular ink typing')
+    terminal.dispose()
+  })
+
+  it('does not flush an unterminated TSP APC into the Ink input stream', () => {
+    const decoder = new TspInputDecoder()
+    expect(decoder.push('hello' + String.fromCharCode(27) + '_tsp;e;{"ev":"send"')).toEqual({
+      input: 'hello',
+      tsp: [],
+    })
+    expect(decoder.flush()).toBe('')
+  })
+})

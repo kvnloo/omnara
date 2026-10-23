@@ -133,3 +133,22 @@ describe('bounded TSP framing and event reassembly', () => {
     expect(decodeTspEvent('tsp;e;{"ev":"edit","sf":"s","id":"c","from":-1,"to":2,"text":"x","cursor":0,"len":2}')).toBeNull()
   })
 })
+
+describe('native transport invalid capability and credit guards', () => {
+  it('rejects unsupported credit counts instead of inventing an ACK window', () => {
+    expect(() => new TernComposerTransport(() => undefined, {
+      r: 'hello', v: 1, term: 'tern', kinds: ['col', 'editor'], credits: 0,
+    })).toThrow(RangeError)
+    expect(() => new TernComposerTransport(() => undefined, {
+      r: 'hello', v: 1, term: 'tern', kinds: ['col', 'editor'], apc: 64,
+    })).toThrow(RangeError)
+  })
+
+  it('rejects a malformed same-length edit rather than clamping its range', () => {
+    const event = {
+      ev: 'edit', sf: TERN_SURFACE_ID, id: TERN_COMPOSER_ID,
+      from: 3, to: 1, len: 4, cursor: 2, text: 'x',
+    } as const
+    expect(applyTernComposerEdit('abcd', event)).toBeNull()
+  })
+})

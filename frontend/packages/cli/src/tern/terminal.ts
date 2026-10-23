@@ -72,7 +72,8 @@ export class TspInputDecoder {
   flush(): string {
     const input = this.pending
     this.pending = ''
-    return input
+    // An incomplete TSP frame must never become keyboard input on shutdown.
+    return input.startsWith(TSP_START) ? '' : input
   }
 }
 
@@ -186,7 +187,7 @@ export class TernTerminal {
   /** The mux as Ink's `render({ stdin })` option. */
   inkStdin(): NodeJS.ReadStream {
     const stream: Duplex = this.stdin
-    // SAFETY: Ink 7 reads stdin only through isTTY, setEncoding, setRawMode,
+    // SAFETY: Ink 8 reads stdin only through isTTY, setEncoding, setRawMode,
     // ref/unref, read/unshift and listeners; TernInputMux (a PassThrough that
     // forwards raw mode and ref/unref to the real tty) implements all of them.
     return stream as NodeJS.ReadStream
