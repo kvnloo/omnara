@@ -211,14 +211,15 @@ export class TernComposerTransport {
     if (this.acked >= this.seq) return Promise.resolve(true)
     this.cancelAckWait()
     return new Promise<boolean>((resolve) => {
-      let timer: ReturnType<typeof setTimeout> | undefined
       const finish = (acknowledged: boolean): void => {
         if (this.ackWait?.finish === finish) this.ackWait = null
-        if (timer != null) clearTimeout(timer)
+        clearTimeout(timer)
         resolve(acknowledged)
       }
       this.ackWait = { target: this.seq, finish }
-      timer = setTimeout(() => finish(false), timeoutMs)
+      const timer = setTimeout(() => {
+        finish(false)
+      }, timeoutMs)
     })
   }
 

@@ -37,16 +37,12 @@ describe('real OS PTY Omnara chat input', () => {
     const node = process.execPath
     const tsx = fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url))
     const lab = fileURLToPath(new URL('./lab.ts', import.meta.url))
-    const { stdout } = await promisify(execFile)(
-      'python3',
-      [script, node, tsx, lab, '--no-ack'],
-      {
-        cwd: fileURLToPath(new URL('../../', import.meta.url)),
-        timeout: 20_000,
-        maxBuffer: 1_048_576,
-        env: { PATH: process.env.PATH, TERM: 'xterm-256color', NO_COLOR: '1' },
-      },
-    )
+    const { stdout } = await promisify(execFile)('python3', [script, node, tsx, lab, '--no-ack'], {
+      cwd: fileURLToPath(new URL('../../', import.meta.url)),
+      timeout: 20_000,
+      maxBuffer: 1_048_576,
+      env: { PATH: process.env.PATH, TERM: 'xterm-256color', NO_COLOR: '1' },
+    })
     expect(stdout).toContain('Real OS PTY missing-ACK deadline and clean next-shell proof passed')
   }, 25_000)
 })

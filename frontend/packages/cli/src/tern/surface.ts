@@ -86,6 +86,7 @@ export function useTernComposerSurface({
     }
 
     const lifecycle = { cancelled: false }
+    const isCancelled = (): boolean => lifecycle.cancelled
     let owned = false
     let unsubscribe: (() => void) | undefined
     let unsubscribeKeys: (() => void) | undefined
@@ -147,7 +148,7 @@ export function useTernComposerSurface({
       }
       void (async () => {
         if (drain != null) await drain
-        if (lifecycle.cancelled) return
+        if (isCancelled()) return
         const restore = resume
         resume = undefined
         teardown()
@@ -158,7 +159,7 @@ export function useTernComposerSurface({
             terminal.disableNativeSurface()
           }
         }
-        if (!lifecycle.cancelled) callbacksRef.current.onQuit()
+        if (!isCancelled()) callbacksRef.current.onQuit()
       })()
     }
 

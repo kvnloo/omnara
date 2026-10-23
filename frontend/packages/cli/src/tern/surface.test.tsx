@@ -424,9 +424,12 @@ describe('mounted Ink/Tern composer lifecycle', () => {
         .split('\x1b\\')
         .map((packet) => packet.slice(packet.lastIndexOf('\x1b_tsp;f;')))
         .filter((packet) => packet.startsWith('\x1b_tsp;f;'))
-        .map((packet) => JSON.parse(packet.slice('\x1b_tsp;f;'.length)) as {
-          s: number
-          ops: unknown[][]
+        .map((packet) => {
+          // SAFETY: These frame packets are emitted by this fixture's typed transport, not peer input.
+          return JSON.parse(packet.slice('\x1b_tsp;f;'.length)) as {
+            s: number
+            ops: unknown[][]
+          }
         })
       expect(frames.length).toBeGreaterThan(1)
       expect(
@@ -435,7 +438,10 @@ describe('mounted Ink/Tern composer lifecycle', () => {
             (op) =>
               op[0] === 'set' &&
               op[1] === 'omnara:composer' &&
-              (op[2] as { text?: string }).text === '',
+              typeof op[2] === 'object' &&
+              op[2] !== null &&
+              'text' in op[2] &&
+              op[2].text === '',
           ),
         ),
       ).toBe(false)
@@ -448,7 +454,9 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       expect(onQuit).not.toHaveBeenCalled()
       const lastSeq = Math.max(...frames.map((frame) => frame.s))
       fixture.source.write(event({ ev: 'ack', sf: 'omnara:session', s: lastSeq }))
-      await vi.waitFor(() => expect(onQuit).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => {
+        expect(onQuit).toHaveBeenCalledTimes(1)
+      })
       expect(fixture.writes.join('')).toContain('\x1b_tsp;x;')
     } finally {
       fixture.dispose()
@@ -465,7 +473,12 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     try {
       await activate(fixture)
       fixture.source.write('/quit\r')
-      await vi.waitFor(() => expect(onQuit).toHaveBeenCalledTimes(1), { timeout: 1_500 })
+      await vi.waitFor(
+        () => {
+          expect(onQuit).toHaveBeenCalledTimes(1)
+        },
+        { timeout: 1_500 },
+      )
     } finally {
       fixture.dispose()
     }
