@@ -239,7 +239,9 @@ describe('partial acquisition and rejected surface restoration', () => {
     terminal.stdin.on('data', (data: Buffer) => {
       ink.push(data.toString())
     })
-    expect(() => terminal.beginNativeOwnership()).toThrow('tty output failed')
+    expect(() => {
+      terminal.beginNativeOwnership()
+    }).toThrow('tty output failed')
     expect(source.isRaw).toBe(false)
     expect(source.refs).toBe(0)
     source.write('ordinary input')

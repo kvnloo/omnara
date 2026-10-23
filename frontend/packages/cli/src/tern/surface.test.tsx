@@ -81,8 +81,7 @@ function mount(
   const props: Props = { ...mode, terminal, onSend, onQuit }
   const app = render(<Harness {...props} />, {
     stdin: terminal.inkStdin(),
-    // SAFETY: Ink uses .write, isTTY and dimensions; the writable fixture provides them.
-    stdout: stdout as NodeJS.WriteStream,
+    stdout,
     patchConsole: false,
     exitOnCtrlC: false,
   })
@@ -144,7 +143,7 @@ describe('mounted Ink/Tern composer lifecycle', () => {
 
   it('does not drop a distinct atomic send while the previous send promise is pending', async () => {
     const sends: string[] = []
-    const complete: Array<() => void> = []
+    const complete: (() => void)[] = []
     const fixture = mount(
       { enabled: true, idle: true, liveProjectionEnabled: false },
       (text) => {
@@ -473,8 +472,7 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       />,
       {
         stdin: terminal.inkStdin(),
-        // SAFETY: Ink uses .write, isTTY and dimensions; the writable fixture provides them.
-        stdout: stdout as NodeJS.WriteStream,
+        stdout,
         patchConsole: false,
         exitOnCtrlC: false,
       },
