@@ -145,7 +145,8 @@ export function useTernComposerSurface({
           projectMain ? mainRef.current : [],
         )
 
-        const currentMain = (): readonly TernLiveNode[] => (projectMain ? mainRef.current : [])
+        const currentMain = (): readonly TernLiveNode[] =>
+          projectMain ? mainRef.current : []
 
         const applyDraft = (next: { cursor: number; text: string }): void => {
           if (next.text !== nativeTextRef.current) lastSubmitted = undefined
