@@ -1,7 +1,7 @@
 import { reconcileTernLiveNodes, type TernLiveNode } from './liveProjection.ts'
 import {
   encodeTspJson,
-  OMNARA_TSP_PROGRAM_FEATURES,
+  TSP_VERSION,
   type TspEvent,
   type TspHello,
   type TspJson,
@@ -29,9 +29,7 @@ export function applyTernComposerEdit(
 }
 
 export const supportsTernComposer = (hello: TspHello): boolean =>
-  hello.kinds.includes('col') &&
-  hello.kinds.includes('editor') &&
-  OMNARA_TSP_PROGRAM_FEATURES.includes('edit')
+  hello.v === TSP_VERSION && hello.kinds.includes('col') && hello.kinds.includes('editor')
 
 export const supportsTernLiveSurface = (hello: TspHello): boolean =>
   supportsTernComposer(hello) &&
@@ -157,8 +155,14 @@ export class TernComposerTransport {
   }
 
   handleEvent(event: TspEvent): void {
-    if (event.ev !== 'ack' || event.sf !== TERN_SURFACE_ID) return
-    this.acked = Math.max(this.acked, Math.min(event.s, this.seq))
+    if (
+      event.ev !== 'ack' ||
+      event.sf !== TERN_SURFACE_ID ||
+      !Number.isSafeInteger(event.s) ||
+      event.s < 1 ||
+      event.s > this.seq
+    ) return
+    this.acked = Math.max(this.acked, event.s)
     if (this.pending != null && this.seq - this.acked < this.credits) {
       const pending = this.pending
       this.pending = null

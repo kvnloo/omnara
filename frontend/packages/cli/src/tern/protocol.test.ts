@@ -152,3 +152,19 @@ describe('native transport invalid capability and credit guards', () => {
     expect(applyTernComposerEdit('abcd', event)).toBeNull()
   })
 })
+
+describe('native ACK ownership', () => {
+  it('never treats a future ACK as permission to send another frame', () => {
+    const writes: string[] = []
+    const transport = new TernComposerTransport((data) => writes.push(data), {
+      r: 'hello', v: 1, term: 'tern', kinds: ['col', 'editor'], credits: 1,
+    })
+    transport.start({ text: '', cursor: 0 }, true)
+    transport.update({ text: 'later', cursor: 5 }, true)
+    transport.handleEvent({ ev: 'ack', sf: TERN_SURFACE_ID, s: 900 })
+    expect(writes).toHaveLength(2)
+    transport.handleEvent({ ev: 'ack', sf: TERN_SURFACE_ID, s: 1 })
+    expect(writes).toHaveLength(3)
+    expect(writes[2]).toContain('later')
+  })
+})
