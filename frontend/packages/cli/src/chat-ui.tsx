@@ -22,6 +22,7 @@ import { supportsTernAgentSurface } from './tern/composer.ts'
 import { projectTernSession } from './tern/liveProjection.ts'
 import { projectTernSubagents } from './tern/subagentProjection.ts'
 import { useTernComposerSurface } from './tern/surface.ts'
+import type { TernPresentationMode } from './tern/config.ts'
 import type { TernTerminal } from './tern/terminal.ts'
 
 type MessagePart = OmnaraUIMessage['parts'][number]
@@ -364,7 +365,15 @@ function Transcript({ items, live }: { items: TranscriptItem[]; live: OmnaraUIMe
   )
 }
 
-export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: TernTerminal }) {
+export function Chat({
+  scope,
+  terminal,
+  ternMode = 'composer',
+}: {
+  scope: AgentChatScope
+  terminal: TernTerminal
+  ternMode?: TernPresentationMode
+}) {
   const chat = useAgentChat(scope, { source: 'cli' })
   const interactions = useAgentInteractions(scope.orgID, scope.projectID, scope.agentID)
   const resolveInteraction = useResolveAgentInteraction(scope.orgID, scope.projectID, scope.agentID)
@@ -373,8 +382,11 @@ export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: Ter
     terminal.getSnapshot,
     terminal.getSnapshot,
   )
+  const liveProjectionEnabled = ternMode === 'live'
   const nativeAgentsEnabled =
-    ternSurface.status === 'active' && supportsTernAgentSurface(ternSurface.hello)
+    liveProjectionEnabled &&
+    ternSurface.status === 'active' &&
+    supportsTernAgentSurface(ternSurface.hello)
   const subagents = useAgents(scope.orgID, scope.projectID, {
     filters: { parent_agent_id: scope.agentID, include_archived: true },
     pageSize: 100,
@@ -401,13 +413,17 @@ export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: Ter
     interaction == null ? currentActivity(chat.status, chat.isWorking, live) : undefined
   const timer = useWorkTimer(interaction != null ? 'paused' : chat.isWorking ? 'working' : 'idle')
   const lastDuration = interaction == null && !chat.isWorking ? timer.lastDuration : undefined
-  const nativeEnabled = ready && interaction == null
+  // RFC #12: only an idle composer receives native ownership by default.
+  // #14/#15 streaming and direct-subagent projections are explicit opt-in.
+  const idle = !chat.isWorking && chat.status !== 'submitted'
+  const nativeEnabled = ready && interaction == null && ternMode !== 'off' && (idle || liveProjectionEnabled)
+  const nativeSendable = nativeEnabled && (idle || liveProjectionEnabled)
   const directSubagents = useMemo(
     () => subagents.data?.pages.flatMap((page) => page.data) ?? [],
     [subagents.data],
   )
   const nativeMain = useMemo(
-    () => [
+    () => liveProjectionEnabled ? [
       ...projectTernSession({
         messages: chat.messages,
         backlog: chat.inputBacklog.inputs,
@@ -416,8 +432,9 @@ export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: Ter
         hasOlderMessages: chat.hasOlderMessages,
       }),
       ...projectTernSubagents(directSubagents, subagents.hasNextPage),
-    ],
+    ] : [],
     [
+      liveProjectionEnabled,
       chat.hasOlderMessages,
       chat.inputBacklog.inputs,
       chat.isWorking,
@@ -431,7 +448,9 @@ export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: Ter
   useTernComposerSurface({
     terminal,
     enabled: nativeEnabled,
-    sendable: nativeEnabled,
+    idle,
+    liveProjectionEnabled,
+    sendable: nativeSendable,
     main: nativeMain,
     draft,
     onDraftChange: setDraft,

@@ -17,6 +17,54 @@ omnara --help
 
 Requires Node.js 22 or later.
 
+## Native Tern presentation (downstream experiment)
+
+`omnara agents chat <agent-id>` runs the existing Ink CLI in any terminal.
+Inside a compatible Tern terminal, TSP v1 negotiates an **idle-only native
+composer by default**. The draft and send path remain Omnara-owned. On a
+submitted/running turn or a permission/question interaction, native ownership
+closes and Ink handles transcript, tools, backlog, subagents and approvals.
+Unsupported Tern capabilities, evicted/rejected surfaces, or transport errors
+also return to Ink. No separate backend or credential path is introduced.
+
+Optional live projection from the historical #14/#15 slices is **off by default**.
+To enable native message/tool/backlog/status and direct-subagent projections,
+including native composition while busy, use either:
+
+```sh
+omnara agents chat <agent-id> --tern-live
+OMNARA_TERN_LIVE=1 omnara agents chat <agent-id>
+```
+
+Live mode requires the negotiated native node kinds. Without them, busy turns
+fall back to Ink. Permission/question interactions always remain Ink-owned.
+Set `OMNARA_TERN_NATIVE=0` or use `--no-tern` for the ordinary Ink UI. The
+disable switch wins if both opt-in and disable options are supplied.
+Neither mode moves approvals, agent runtime, event history or SDK semantics into
+Tern. #11's `agents bridge-omp` backend-inversion experiment is excluded.
+
+Development checks from the repository root (`Node >=24`, `pnpm@11.22.0`):
+
+```sh
+cd frontend
+pnpm install --frozen-lockfile
+pnpm --filter omnara test
+pnpm --filter omnara typecheck
+pnpm --filter omnara build
+cd ..
+make web-static-check
+```
+
+These checks are not a native terminal acceptance receipt. Exercise the real
+CLI against a controlled fixture under an owned Tern/pty session, including
+atomic multiline/Unicode send, busy/idle handoff, interactions, resize, focus,
+theme, reconnect and terminal exit.
+
+Tern/TSP and the original OMP native-presentation work: **Can Bölük /
+Stencil Labs**. The native seam follows the Hermes × Tern contributors'
+application-authoritative presentation approach. Omnara contributors own
+the existing durable runtime, React chat state, SDK and Ink CLI.
+
 ## Documentation
 
 See the [Omnara docs](https://docs.omnara.com) and the [GitHub repository](https://github.com/omnara-ai/omnara).

@@ -5,14 +5,19 @@ import { render } from 'ink'
 
 import { Chat } from './chat-ui.tsx'
 import { TernTerminal } from './tern/terminal.ts'
+import type { TernPresentationMode } from './tern/config.ts'
 
-export async function runChat(client: OmnaraClient, scope: AgentChatScope): Promise<void> {
+export async function runChat(
+  client: OmnaraClient,
+  scope: AgentChatScope,
+  ternMode: TernPresentationMode = 'composer',
+): Promise<void> {
   const queryClient = new QueryClient()
   const terminal = new TernTerminal(process.stdin, process.stdout)
   const app = render(
     <QueryClientProvider client={queryClient}>
       <OmnaraClientProvider client={client}>
-        <Chat scope={scope} terminal={terminal} />
+        <Chat scope={scope} terminal={terminal} ternMode={ternMode} />
       </OmnaraClientProvider>
     </QueryClientProvider>,
     { stdin: terminal.inkStdin() },
