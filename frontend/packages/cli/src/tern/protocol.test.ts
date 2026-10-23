@@ -123,7 +123,12 @@ describe('bounded TSP framing and event reassembly', () => {
   it('assembles UTF-8-safe incoming event chunks and rejects orphan chunks', async () => {
     const { TspChunkAssembler, encodeTspMessage } = await import('./protocol.ts')
     const assembler = new TspChunkAssembler()
-    const message = { ev: 'send', sf: TERN_SURFACE_ID, id: TERN_COMPOSER_ID, text: 'a🌿'.repeat(70) }
+    const message = {
+      ev: 'send',
+      sf: TERN_SURFACE_ID,
+      id: TERN_COMPOSER_ID,
+      text: 'a🌿'.repeat(70),
+    }
     const wire = encodeTspMessage('e', JSON.stringify(message), 128)
     const st = String.fromCharCode(27, 92)
     const packets = wire.split(st).filter(Boolean).map((part) => part + st)
@@ -138,18 +143,34 @@ describe('bounded TSP framing and event reassembly', () => {
 
   it('rejects invalid ack sequence and out-of-range edit coordinates', () => {
     expect(decodeTspEvent('tsp;e;{"ev":"ack","sf":"s","s":1.5}')).toBeNull()
-    expect(decodeTspEvent('tsp;e;{"ev":"edit","sf":"s","id":"c","from":-1,"to":2,"text":"x","cursor":0,"len":2}')).toBeNull()
+    expect(
+      decodeTspEvent('tsp;e;{"ev":"edit","sf":"s","id":"c","from":-1,"to":2,"text":"x","cursor":0,"len":2}'),
+    ).toBeNull()
   })
 })
 
 describe('native transport invalid capability and credit guards', () => {
   it('rejects unsupported credit counts instead of inventing an ACK window', () => {
-    expect(() => new TernComposerTransport(() => undefined, {
-      r: 'hello', v: 1, term: 'tern', kinds: ['col', 'editor'], credits: 0,
-    })).toThrow(RangeError)
-    expect(() => new TernComposerTransport(() => undefined, {
-      r: 'hello', v: 1, term: 'tern', kinds: ['col', 'editor'], apc: 64,
-    })).toThrow(RangeError)
+    expect(
+      () =>
+        new TernComposerTransport(() => undefined, {
+          r: 'hello',
+          v: 1,
+          term: 'tern',
+          kinds: ['col', 'editor'],
+          credits: 0,
+        }),
+    ).toThrow(RangeError)
+    expect(
+      () =>
+        new TernComposerTransport(() => undefined, {
+          r: 'hello',
+          v: 1,
+          term: 'tern',
+          kinds: ['col', 'editor'],
+          apc: 64,
+        }),
+    ).toThrow(RangeError)
   })
 
   it('rejects a malformed same-length edit rather than clamping its range', () => {
@@ -206,8 +227,11 @@ function parseLikeTern(raw: string) {
 
 describe('continuation boundaries under the full Tern wire grammar', () => {
   it('round-trips adversarial parameter-shaped prefixes and UTF-8 over chunk boundaries', () => {
-    const input = { sf: 'omnara:session', s: 7,
-      ops: [['set', 'omnara:composer', { text: 'a'.repeat(122) + 'x=1;y=2;\n🌿👍🏽'.repeat(70) }]] }
+    const input = {
+      sf: 'omnara:session',
+      s: 7,
+      ops: [['set', 'omnara:composer', { text: 'a'.repeat(122) + 'x=1;y=2;\n🌿👍🏽'.repeat(70) }]],
+    }
     const body = JSON.stringify(input)
     const wire = encodeTspMessage('f', body, 128)
     const packets = wire.split('\x1b\\').filter(Boolean).map((part) => part.slice(2))
