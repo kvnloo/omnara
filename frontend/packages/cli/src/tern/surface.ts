@@ -77,7 +77,7 @@ export function useTernComposerSurface({
       return
     }
 
-    let cancelled = false
+    const lifecycle = { cancelled: false }
     let owned = false
     let unsubscribe: (() => void) | undefined
     let unsubscribeKeys: (() => void) | undefined
@@ -112,7 +112,9 @@ export function useTernComposerSurface({
       if (resume != null) {
         const restore = resume
         resume = undefined
-        void restore().catch(() => terminal.disableNativeSurface())
+        void restore().catch(() => {
+          terminal.disableNativeSurface()
+        })
       }
       if (failed) terminal.disableNativeSurface()
     }
@@ -122,7 +124,7 @@ export function useTernComposerSurface({
         const suspension = await suspendTerminal()
         resume = () => suspension.resume()
         // A pending Ink suspension may settle after an interaction arrives.
-        if (cancelled) {
+        if (lifecycle.cancelled) {
           teardown()
           return
         }
@@ -154,7 +156,7 @@ export function useTernComposerSurface({
         }
 
         const submit = (text: string): void => {
-          if (cancelled || !owned || !sendableRef.current) return
+          if (lifecycle.cancelled || !owned || !sendableRef.current) return
           const trimmed = text.trim()
           if (trimmed === '' || lastSubmitted === text) return
           // Atomic event text is independent of the editor draft. Reject repeat
@@ -174,7 +176,7 @@ export function useTernComposerSurface({
         }
 
         unsubscribe = terminal.subscribeEvents((event) => {
-          if (cancelled || !owned) return
+          if (lifecycle.cancelled || !owned) return
           transport.handleEvent(event)
 
           if (
@@ -221,7 +223,7 @@ export function useTernComposerSurface({
     })()
 
     return () => {
-      cancelled = true
+      lifecycle.cancelled = true
       teardown()
     }
   }, [canOwnSurface, enabled, liveProjectionEnabled, surface, suspendTerminal, terminal])
