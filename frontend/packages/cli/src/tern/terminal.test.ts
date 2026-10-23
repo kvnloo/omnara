@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import { applyTernComposerEdit } from './composer.ts'
 import { applyTernComposerKey, TernComposerKeyDecoder } from './keys.ts'
+import type { TspJson } from './protocol.ts'
 import { TernTerminal, TspInputDecoder } from './terminal.ts'
 
 describe('TSP stdin filtering', () => {
@@ -50,9 +51,13 @@ describe('native ownership input routing', () => {
       },
     })
     const inkInput: string[] = []
-    terminal.stdin.on('data', (chunk: Buffer | string) => inkInput.push(chunk.toString()))
+    terminal.stdin.on('data', (chunk: Buffer | string) => {
+      inkInput.push(chunk.toString())
+    })
     const keys: string[] = []
-    terminal.subscribeKeys((chunk) => keys.push(chunk))
+    terminal.subscribeKeys((chunk) => {
+      keys.push(chunk)
+    })
 
     source.write('a')
     terminal.beginNativeOwnership()
@@ -109,7 +114,7 @@ describe('terminal native safety fallback', () => {
     const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
     terminal.probe()
     const st = String.fromCharCode(27, 92)
-    const apc = (verb: string, body: unknown) =>
+    const apc = (verb: string, body: TspJson) =>
       String.fromCharCode(27) + '_tsp;' + verb + ';' + JSON.stringify(body) + st
     source.write(apc('r', { r: 'hello', v: 1, term: 'tern', kinds: ['col', 'editor'] }))
     expect(terminal.getSnapshot().status).toBe('active')
@@ -122,7 +127,9 @@ describe('terminal native safety fallback', () => {
     const source = new RawTtyInput()
     const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
     const inkInput: string[] = []
-    terminal.stdin.on('data', (chunk: Buffer) => inkInput.push(chunk.toString()))
+    terminal.stdin.on('data', (chunk: Buffer) => {
+      inkInput.push(chunk.toString())
+    })
     terminal.probe()
     source.write(String.fromCharCode(27) + '_tsp;e;' + 'x'.repeat(1_048_577))
     expect(terminal.getSnapshot().status).toBe('unsupported')
@@ -136,7 +143,9 @@ describe('ordinary terminal compatibility', () => {
     const source = new PassThrough()
     const terminal = new TernTerminal(source, { isTTY: false, write: () => undefined })
     const keys: string[] = []
-    terminal.stdin.on('data', (chunk: Buffer) => keys.push(chunk.toString()))
+    terminal.stdin.on('data', (chunk: Buffer) => {
+      keys.push(chunk.toString())
+    })
     terminal.probe()
     expect(terminal.getSnapshot().status).toBe('unsupported')
     source.write('regular ink typing')
@@ -155,7 +164,7 @@ describe('ordinary terminal compatibility', () => {
   })
 })
 
-const eventApc = (data: object) => '\x1b_tsp;e;' + JSON.stringify(data) + '\x1b\\'
+const eventApc = (data: TspJson) => '\x1b_tsp;e;' + JSON.stringify(data) + '\x1b\\'
 const helloApc = (kinds: string[] = ['col', 'editor']) =>
   '\x1b_tsp;r;' + JSON.stringify({ r: 'hello', v: 1, term: 'tern', kinds }) + '\x1b\\'
 
@@ -198,8 +207,12 @@ describe('mixed APC and pty key ordering', () => {
     terminal.probe()
     source.write(helloApc())
     const calls: string[] = []
-    terminal.subscribeKeys((s) => calls.push('key:' + s))
-    terminal.subscribeEvents((e) => calls.push('event:' + e.ev))
+    terminal.subscribeKeys((s) => {
+      calls.push('key:' + s)
+    })
+    terminal.subscribeEvents((e) => {
+      calls.push('event:' + e.ev)
+    })
     terminal.beginNativeOwnership()
     const edit = eventApc({
       ev: 'edit', sf: 'omnara:session', id: 'omnara:composer',
@@ -256,7 +269,9 @@ describe('partial acquisition and rejected surface restoration', () => {
     const source = new RawTtyInput()
     const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
     const calls: string[] = []
-    terminal.subscribeEvents((event) => calls.push(event.ev))
+    terminal.subscribeEvents((event) => {
+      calls.push(event.ev)
+    })
     terminal.probe()
     source.write(helloApc())
     source.write(eventApc({ ev: 'resize', sf: 'omnara:session', cols: 90, visible: false }))
