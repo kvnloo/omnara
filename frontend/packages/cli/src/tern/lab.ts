@@ -84,21 +84,21 @@ async function requestBody(req: IncomingMessage): Promise<string> {
 }
 
 function completeTurn(turnIndex: number, input: string): void {
-  const evt = {
+  const evt = schemas.zModelOutputEvent.parse({
     id: fixtureId('evt', ++sequence),
     org_id: scope.orgID,
     project_id: scope.projectID,
     agent_id: scope.agentID,
     turn_id: fixtureId('trn', turnIndex),
     turn_sequence: turnIndex,
-    is_opening_event: false as const,
+    is_opening_event: false,
     sequence,
-    event_kind: 'model_output' as const,
+    event_kind: 'model_output',
     model_call_context_id: fixtureId('mcc', turnIndex),
-    stop_reason: 'end_turn' as const,
-    content_blocks: [{ type: 'text' as const, text: 'Fixture echo: ' + input }],
+    stop_reason: 'end_turn',
+    content_blocks: [{ type: 'text', text: 'Fixture echo: ' + input }],
     created_at: timestamp(),
-  }
+  })
   activity.state = 'idle'
   broadcast(JSON.stringify(evt), evt.sequence)
 }
@@ -126,7 +126,7 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
       const before = Number(url.searchParams.get('before_sequence') ?? '0')
       const page = before > 0 ? events.filter((event) => event.sequence < before) : events
       json(res, 200, JSON.stringify({
-        data: page.slice(-100),
+        data: page.slice(-100).map((event) => schemas.zAgentEvent.parse(JSON.parse(event.payload))),
         next_after_sequence: sequence,
         next_before_sequence: null,
         has_more: false,
@@ -174,18 +174,19 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
         .join('\n')
       const inputID = fixtureId('ain', turn + 1)
       const createdAt = timestamp()
-      const input = {
+      const storedBlocks = blocks.filter((block) => block.type === 'text')
+      const input = schemas.zAgentInput.parse({
         id: inputID,
         agent_id: scope.agentID,
         state: 'received',
-        delivery_mode: 'immediate' as const,
-        input_kind: 'content' as const,
-        content_blocks: blocks,
+        delivery_mode: 'immediate',
+        input_kind: 'content',
+        content_blocks: storedBlocks,
         queued_at: createdAt,
-      }
+      })
       const currentTurn = ++turn
       activity.state = 'running'
-      broadcast(JSON.stringify({
+      broadcast(JSON.stringify(schemas.zAgentInputEvent.parse({
         id: fixtureId('evt', ++sequence),
         org_id: scope.orgID,
         project_id: scope.projectID,
@@ -197,9 +198,9 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
         event_kind: 'agent_input',
         agent_input_id: inputID,
         input_kind: 'content',
-        content_blocks: blocks,
+        content_blocks: storedBlocks,
         created_at: createdAt,
-      }), sequence)
+      })), sequence)
       json(res, 201, JSON.stringify({ agent_input: input }))
       if (text.trim().startsWith('/ask')) {
         interaction = schemas.zAgentInteraction.parse({
@@ -312,7 +313,11 @@ async function main(): Promise<void> {
     for (const stream of streams) stream.end()
     streams.clear()
     server.closeAllConnections()
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve()
+      })
+    })
   }
 }
 
