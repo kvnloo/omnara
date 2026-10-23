@@ -1,6 +1,6 @@
 import type { AgentInteraction, InteractionAnswer } from '@omnara/sdk'
 import { Box, Text, useInput } from 'ink'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export function Label({ name, color }: { name: string; color: string }) {
   return (
@@ -27,19 +27,37 @@ export function TextInput({
   onChange: (value: string) => void
   onSubmit: (value: string) => void
 }) {
+  // Ink can dispatch several PTY reads before React commits the first edit.
+  // Assemble in the application synchronously; a lagging render must not
+  // replace those bytes with an earlier controlled value.
+  const textRef = useRef(value)
+  const pendingRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (pendingRef.current === value) pendingRef.current = null
+    if (pendingRef.current === null) textRef.current = value
+  }, [value])
+  const change = (next: string): void => {
+    textRef.current = next
+    pendingRef.current = next
+    onChange(next)
+  }
+
   useInput((input, key) => {
+    const current = textRef.current
     if (key.return) {
-      onSubmit(value)
+      textRef.current = ''
+      pendingRef.current = null
+      onSubmit(current)
       return
     }
     if (key.backspace || key.delete) {
-      onChange(dropLastGrapheme(value))
+      change(dropLastGrapheme(current))
       return
     }
     if (key.ctrl || key.meta || key.escape || key.tab) return
     if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) return
     if (key.pageUp || key.pageDown) return
-    onChange(value + input)
+    change(current + input)
   })
   return (
     <Text>
