@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 
-import { Text, render } from 'ink'
+import { render, Text } from 'ink'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -49,9 +49,9 @@ function Harness({ terminal, onSend, main = [], ...mode }: Props) {
 }
 
 const hello = (kinds: string[] = ['col', 'editor']) =>
-  '\x1b_tsp;r;' + JSON.stringify({
-    r: 'hello', v: 1, term: 'tern', kinds, credits: 2,
-  }) + '\x1b\\'
+  '\x1b_tsp;r;' +
+  JSON.stringify({ r: 'hello', v: 1, term: 'tern', kinds, credits: 2 }) +
+  '\x1b\\'
 const event = (data: object) => '\x1b_tsp;e;' + JSON.stringify(data) + '\x1b\\'
 const send = (text: string) =>
   event({ ev: 'send', sf: 'omnara:session', id: 'omnara:composer', text })
@@ -92,9 +92,7 @@ async function activate(fixture: ReturnType<typeof mount>, kinds?: string[]) {
   await vi.waitFor(() => expect(fixture.terminal.getSnapshot().status).toBe('probing'))
   fixture.source.write(hello(kinds))
   await vi.waitFor(() => expect(fixture.source.isRaw).toBe(true))
-  await vi.waitFor(() =>
-    expect(fixture.writes.join('')).toContain('"id":"omnara:session"'),
-  )
+  await vi.waitFor(() => expect(fixture.writes.join('')).toContain('"id":"omnara:session"'))
 }
 
 describe('mounted Ink/Tern composer lifecycle', () => {
@@ -102,7 +100,9 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     const sends: string[] = []
     const fixture = mount(
       { enabled: true, idle: true, liveProjectionEnabled: false },
-      async (text) => { sends.push(text) },
+      async (text) => {
+        sends.push(text)
+      },
     )
     try {
       await activate(fixture)
@@ -120,9 +120,7 @@ describe('mounted Ink/Tern composer lifecycle', () => {
 
   it('closes idle native ownership during work and an interaction, then resumes', async () => {
     const onSend = vi.fn(async (_text: string) => undefined)
-    const fixture = mount(
-      { enabled: true, idle: true, liveProjectionEnabled: false }, onSend,
-    )
+    const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, onSend)
     try {
       await activate(fixture)
       fixture.rerender({ enabled: true, idle: false, liveProjectionEnabled: false })
@@ -153,17 +151,12 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       const main: TernLiveNode[] = [
         { id: 'omnara:message:fixture', k: 'text', p: { text: 'live projection' } },
       ]
-      fixture.rerender(
-        { enabled: true, idle: false, liveProjectionEnabled: true },
-        main,
-      )
+      fixture.rerender({ enabled: true, idle: false, liveProjectionEnabled: true }, main)
       await vi.waitFor(() => expect(fixture.writes.join('')).toContain('live projection'))
       fixture.source.write(send('backlog payload'))
       await vi.waitFor(() => expect(onSend).toHaveBeenCalledWith('backlog payload'))
       fixture.source.write(event({ ev: 'gone', sf: 'omnara:session', ids: ['main'] }))
-      await vi.waitFor(() =>
-        expect(fixture.terminal.getSnapshot().status).toBe('unsupported'),
-      )
+      await vi.waitFor(() => expect(fixture.terminal.getSnapshot().status).toBe('unsupported'))
     } finally {
       fixture.dispose()
     }
@@ -198,8 +191,13 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     }) as typeof stdout.write
     const terminal = new TernTerminal(source, stdout)
     const app = render(
-      <Harness terminal={terminal} enabled idle liveProjectionEnabled={false}
-        onSend={async () => undefined} />,
+      <Harness
+        terminal={terminal}
+        enabled
+        idle
+        liveProjectionEnabled={false}
+        onSend={async () => undefined}
+      />,
       {
         stdin: terminal.inkStdin(),
         stdout: stdout as unknown as NodeJS.WriteStream,

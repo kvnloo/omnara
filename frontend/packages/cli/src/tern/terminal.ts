@@ -152,15 +152,25 @@ export class TernInputMux extends PassThrough {
 
   dispose(): void {
     if (this.disposed) return
-    this.source.off('data', this.onSourceData)
-    const tail = this.decoder.flush()
-    if (!this.nativeOwnership && tail !== '') this.write(tail)
-    this.end()
-    // Hand the tty back cooked and released so the process can exit.
-    this.source.setRawMode?.(false)
-    this.source.pause?.()
-    this.source.unref?.()
     this.disposed = true
+    this.source.off('data', this.onSourceData)
+    try {
+      const tail = this.decoder.flush()
+      if (!this.nativeOwnership && tail !== '') this.write(tail)
+      this.end()
+    } finally {
+      // Release all resources even if ending the stream or restoring raw mode
+      // throws: Ink must not keep a detached TTY referenced.
+      try {
+        this.source.setRawMode?.(false)
+      } finally {
+        try {
+          this.source.pause?.()
+        } finally {
+          this.source.unref?.()
+        }
+      }
+    }
   }
 
   private readonly onSourceData = (data: string | Buffer): void => {
