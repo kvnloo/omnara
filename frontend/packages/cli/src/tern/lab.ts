@@ -63,12 +63,14 @@ let sequence = 0
 let turn = 0
 const responseTimers = new Set<ReturnType<typeof setTimeout>>()
 
-function json(res: ServerResponse, status: number, payload: string): void {
+function json(res: ServerResponse, status: number, payload: string | undefined): void {
+  if (payload == null) throw new Error('Fixture JSON serialization failed')
   res.writeHead(status, { 'Content-Type': 'application/json' })
   res.end(payload)
 }
 
-function broadcast(payload: string, sequence?: number): void {
+function broadcast(payload: string | undefined, sequence?: number): void {
+  if (payload == null) throw new Error('Fixture SSE serialization failed')
   if (sequence != null) events.push({ sequence, payload })
   for (const stream of streams) stream.write('data: ' + payload + '\n\n')
 }
