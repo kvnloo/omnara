@@ -24,10 +24,16 @@ function retainedPrefixLength(value: string, marker: string): number {
   return 0
 }
 
-/** Ordinary terminal input and the TSP payloads split out of one stdin chunk. */
+/** Input parts must be dispatched in wire order, across split APC markers. */
+export type TspInputPart =
+  | { kind: 'input'; data: string }
+  | { kind: 'tsp'; payload: string }
+  | { kind: 'invalid' }
+
 export interface TspInputChunk {
   input: string
   tsp: string[]
+  parts: TspInputPart[]
   invalid?: boolean
 }
 
@@ -38,42 +44,57 @@ export class TspInputDecoder {
     this.pending += chunk
     let input = ''
     const tsp: string[] = []
+    const parts: TspInputPart[] = []
     let invalid = false
+    const appendInput = (value: string): void => {
+      if (value === '') return
+      input += value
+      const last = parts.at(-1)
+      if (last?.kind === 'input') last.data += value
+      else parts.push({ kind: 'input', data: value })
+    }
+    const reject = (): void => {
+      invalid = true
+      parts.push({ kind: 'invalid' })
+    }
 
     for (;;) {
       const start = this.pending.indexOf(TSP_START)
       if (start === -1) {
         const keep = retainedPrefixLength(this.pending, TSP_START)
-        input += this.pending.slice(0, this.pending.length - keep)
+        appendInput(this.pending.slice(0, this.pending.length - keep))
         this.pending = this.pending.slice(this.pending.length - keep)
         break
       }
 
-      input += this.pending.slice(0, start)
+      appendInput(this.pending.slice(0, start))
       const end = this.pending.indexOf(ST, start + TSP_START.length)
       if (end === -1) {
         this.pending = this.pending.slice(start)
         if (Buffer.byteLength(this.pending, 'utf8') > TSP_MAX_INBOUND_BYTES) {
           this.pending = ''
-          invalid = true
+          reject()
         }
         break
       }
 
       const payload = this.pending.slice(start + 2, end)
-      if (Buffer.byteLength(payload, 'utf8') > TSP_MAX_INBOUND_BYTES) invalid = true
-      else tsp.push(payload)
+      if (Buffer.byteLength(payload, 'utf8') > TSP_MAX_INBOUND_BYTES) reject()
+      else {
+        tsp.push(payload)
+        parts.push({ kind: 'tsp', payload })
+      }
       this.pending = this.pending.slice(end + ST.length)
     }
 
-    return invalid ? { input, tsp, invalid: true } : { input, tsp }
+    return invalid ? { input, tsp, parts, invalid: true } : { input, tsp, parts }
   }
 
   flush(): string {
     const input = this.pending
     this.pending = ''
     // An incomplete TSP frame must never become keyboard input on shutdown.
-    return input.startsWith(TSP_START) ? '' : input
+    return input.startsWith(TSP_START) || TSP_START.startsWith(input) ? '' : input
   }
 }
 
@@ -144,13 +165,14 @@ export class TernInputMux extends PassThrough {
 
   private readonly onSourceData = (data: string | Buffer): void => {
     const decoded = this.decoder.push(data.toString())
-    if (decoded.invalid) this.emit('invalid')
-    for (const payload of decoded.tsp) this.emit('tsp', payload)
-    if (decoded.input === '') return
-    // Tern still delivers ordinary keys as pty input while it shows the native
-    // composer. Route them to that composer; Ink is suspended and must not see them.
-    if (this.nativeOwnership) this.emit('keys', decoded.input)
-    else this.write(decoded.input)
+    for (const part of decoded.parts) {
+      if (part.kind === 'invalid') this.emit('invalid')
+      else if (part.kind === 'tsp') this.emit('tsp', part.payload)
+      // Tern's keys and events share the pty; delivering either kind out of
+      // order changes the authoritative draft (and can invalidate edit.len).
+      else if (this.nativeOwnership) this.emit('keys', part.data)
+      else this.write(part.data)
+    }
   }
 }
 
@@ -237,27 +259,60 @@ export class TernTerminal {
     if (this.probeTimer != null) clearTimeout(this.probeTimer)
     this.probeTimer = undefined
     this.chunks.clear()
+    // Release the mux synchronously so subsequent ordinary bytes can reach Ink
+    // even before the suspended React tree has completed its cleanup.
+    try {
+      this.endNativeOwnership()
+    } catch {
+      // Always publish fallback; a rejected paste-disable write is not a reason
+      // to keep raw mode or input ownership.
+    }
     if (this.state.status !== 'unsupported') this.setState({ status: 'unsupported' })
   }
 
   beginNativeOwnership(): void {
     this.stdin.setNativeOwnership(true)
-    if (this.stdin.isTTY) {
-      this.stdin.ref()
-      this.stdin.setRawMode(true)
-      this.forcedRaw = true
-      // Multi-line pastes must insert, not submit at the first newline.
-      this.stdout.write(BRACKETED_PASTE_ON)
+    try {
+      if (this.stdin.isTTY) {
+        this.stdin.ref()
+        // Mark before calling setRawMode: a throwing TTY may still have changed
+        // its raw state. Roll back even when the paste-enable write fails.
+        this.forcedRaw = true
+        this.stdin.setRawMode(true)
+        this.stdout.write(BRACKETED_PASTE_ON)
+      }
+    } catch (error) {
+      try {
+        this.endNativeOwnership()
+      } catch {
+        // Prefer the original setup error after attempting every restoration.
+      }
+      throw error
     }
   }
 
   endNativeOwnership(): void {
+    let failure: unknown
     if (this.forcedRaw) {
-      this.stdout.write(BRACKETED_PASTE_OFF)
-      this.stdin.setRawMode(false)
-      this.forcedRaw = false
+      try {
+        this.stdout.write(BRACKETED_PASTE_OFF)
+      } catch (error) {
+        failure = error
+      }
+      try {
+        this.stdin.setRawMode(false)
+        this.forcedRaw = false
+      } catch (error) {
+        failure ??= error
+      }
+      try {
+        this.stdin.unref()
+      } catch (error) {
+        failure ??= error
+      }
     }
     this.stdin.setNativeOwnership(false)
+    if (failure != null) throw failure
   }
 
   write(data: string): void {
@@ -266,15 +321,18 @@ export class TernTerminal {
 
   dispose(): void {
     if (this.probeTimer) clearTimeout(this.probeTimer)
-    this.endNativeOwnership()
-    this.stdin.off('tsp', this.onTsp)
-    this.stdin.off('invalid', this.onInvalid)
-    this.stdin.off('keys', this.onKeys)
-    this.chunks.clear()
-    this.stdin.dispose()
-    this.stateListeners.clear()
-    this.eventListeners.clear()
-    this.keyListeners.clear()
+    try {
+      this.endNativeOwnership()
+    } finally {
+      this.stdin.off('tsp', this.onTsp)
+      this.stdin.off('invalid', this.onInvalid)
+      this.stdin.off('keys', this.onKeys)
+      this.chunks.clear()
+      this.stdin.dispose()
+      this.stateListeners.clear()
+      this.eventListeners.clear()
+      this.keyListeners.clear()
+    }
   }
 
   private readonly onInvalid = (): void => this.disableNativeSurface()

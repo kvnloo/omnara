@@ -85,27 +85,57 @@ const zTspEvent = z.discriminatedUnion('ev', [
 export type TspEvent = z.infer<typeof zTspEvent>
 
 let nextChunkId = 1
-function splitUtf8(body: string, limit: number): string[] {
+// Tern caps complete APC strings independently of its negotiated JSON BODY size.
+const TSP_MAX_WIRE_BYTES = 262_144
+const PARAM_KEY_START = /^[A-Za-z0-9_-]$/
+
+/**
+ * Keep each UTF-8 chunk within the negotiated *body* limit. Tern parses the
+ * complete parameter grammar on every continuation (not just c/m), so a
+ * continuation beginning with "x=1;y" would silently lose "x=1;".
+ */
+function splitUtf8(body: string, budget: number): string[] {
+  const chars = [...body]
+  const offsets = [0]
+  for (const cp of chars) offsets.push((offsets.at(-1) ?? 0) + Buffer.byteLength(cp, 'utf8'))
+
   const chunks: string[] = []
-  let current = ''
-  let bytes = 0
-  for (const cp of body) {
-    const size = Buffer.byteLength(cp, 'utf8')
-    if (bytes + size > limit && current !== '') {
-      chunks.push(current)
-      current = ''
-      bytes = 0
+  let start = 0
+  while (start < chars.length) {
+    let end = start
+    while (end < chars.length && offsets[end + 1]! - offsets[start]! <= budget) end += 1
+    if (end === start) throw new RangeError('TSP chunk budget cannot hold a UTF-8 codepoint')
+    if (end === chars.length) {
+      chunks.push(chars.slice(start).join(''))
+      break
     }
-    current += cp
-    bytes += size
+
+    // Prefer a continuation starting with a character that can never be part
+    // of a parameter name. This works even for arbitrary semicolons in text.
+    let cut = end
+    while (cut > start + 1 && PARAM_KEY_START.test(chars[cut]!)) cut -= 1
+
+    if (PARAM_KEY_START.test(chars[cut]!)) {
+      // A long unbroken ASCII run has no punctuation at the boundary. It is
+      // still safe if its next packet cannot contain a full key=value; prefix.
+      // Move the cut earlier until the next chunk ends before that semicolon.
+      const nextUnsafe = (candidate: number): boolean => {
+        const semi = chars.indexOf(';', candidate)
+        if (semi < 0 || offsets[semi + 1]! - offsets[candidate]! > budget) return false
+        return PARAM_PATTERN.test(chars.slice(candidate, semi).join(''))
+      }
+      while (cut > start + 1 && nextUnsafe(cut)) cut -= 1
+      if (nextUnsafe(cut)) throw new RangeError('No safe TSP continuation boundary')
+    }
+    chunks.push(chars.slice(start, cut).join(''))
+    start = cut
   }
-  if (current !== '') chunks.push(current)
   return chunks
 }
 const frame = (verb: TspVerb, params: string, body: string) =>
   APC + TSP_PREFIX + verb + params + ';' + body + ST
 
-/** The peer's APC limit applies to the complete escape sequence, not just JSON. */
+/** The hello `apc` value limits the JSON body, not escape/header bytes. */
 export function encodeTspMessage(
   verb: TspVerb,
   body: string,
@@ -115,11 +145,17 @@ export function encodeTspMessage(
     throw new RangeError('Invalid TSP APC limit')
   }
   const single = frame(verb, '', body)
-  if (Buffer.byteLength(single, 'utf8') <= limit) return single
+  if (
+    Buffer.byteLength(body, 'utf8') <= limit &&
+    Buffer.byteLength(single, 'utf8') <= TSP_MAX_WIRE_BYTES
+  ) return single
+
   const id = (nextChunkId++).toString(36)
   const continuation = ';c=' + id + ';m=1'
-  const budget = limit - Buffer.byteLength(frame(verb, continuation, ''), 'utf8')
-  if (budget < 4) throw new RangeError('TSP APC limit too small for UTF-8')
+  const budget = Math.min(
+    limit,
+    TSP_MAX_WIRE_BYTES - Buffer.byteLength(frame(verb, continuation, ''), 'utf8'),
+  )
   const chunks = splitUtf8(body, budget)
   return chunks
     .map((chunk, i) => frame(verb, ';c=' + id + (i < chunks.length - 1 ? ';m=1' : ''), chunk))
