@@ -290,6 +290,31 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     }
   })
 
+  it('accepts a distinct atomic prompt after the cleared PTY frame is acknowledged', async () => {
+    const sent: string[] = []
+    const fixture = mount(
+      { enabled: true, idle: true, liveProjectionEnabled: false },
+      (text) => {
+        sent.push(text)
+        return Promise.resolve()
+      },
+    )
+    try {
+      await activate(fixture)
+      fixture.source.write('/ask\r' + send('/'))
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['/ask'])
+      })
+      fixture.source.write(event({ ev: 'ack', sf: 'omnara:session', s: 1 }))
+      fixture.source.write(send('/'))
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['/ask', '/'])
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
   it('retains /ask after busy-to-idle and Ink interaction handoffs', async () => {
     const sent: string[] = []
     const mode = { enabled: true, idle: true, liveProjectionEnabled: false }
