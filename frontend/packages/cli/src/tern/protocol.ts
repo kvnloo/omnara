@@ -87,7 +87,6 @@ export type TspEvent = z.infer<typeof zTspEvent>
 let nextChunkId = 1
 // Tern caps complete APC strings independently of its negotiated JSON BODY size.
 const TSP_MAX_WIRE_BYTES = 262_144
-const PARAM_KEY_START = /^[A-Za-z0-9_-]$/
 
 /**
  * Keep each UTF-8 chunk within the negotiated *body* limit. Tern parses the
@@ -95,38 +94,37 @@ const PARAM_KEY_START = /^[A-Za-z0-9_-]$/
  * continuation beginning with "x=1;y" would silently lose "x=1;".
  */
 function splitUtf8(body: string, budget: number): string[] {
-  const chars = [...body]
+  const chars = Array.from(body)
   const offsets = [0]
   for (const cp of chars) offsets.push((offsets.at(-1) ?? 0) + Buffer.byteLength(cp, 'utf8'))
 
   const chunks: string[] = []
   let start = 0
   while (start < chars.length) {
+    const startByte = offsets.at(start) ?? 0
     let end = start
-    while (end < chars.length && offsets[end + 1]! - offsets[start]! <= budget) end += 1
+    while (end < chars.length && (offsets.at(end + 1) ?? 0) - startByte <= budget) end += 1
     if (end === start) throw new RangeError('TSP chunk budget cannot hold a UTF-8 codepoint')
     if (end === chars.length) {
       chunks.push(chars.slice(start).join(''))
       break
     }
 
-    // Prefer a continuation starting with a character that can never be part
-    // of a parameter name. This works even for arbitrary semicolons in text.
-    let cut = end
-    while (cut > start + 1 && PARAM_KEY_START.test(chars[cut]!)) cut -= 1
-
-    if (PARAM_KEY_START.test(chars[cut]!)) {
-      // A long unbroken ASCII run has no punctuation at the boundary. It is
-      // still safe if its next packet cannot contain a full key=value; prefix.
-      // Move the cut earlier until the next chunk ends before that semicolon.
-      const nextUnsafe = (candidate: number): boolean => {
-        const semi = chars.indexOf(';', candidate)
-        if (semi < 0 || offsets[semi + 1]! - offsets[candidate]! > budget) return false
-        return PARAM_PATTERN.test(chars.slice(candidate, semi).join(''))
+    // A continuation starting with a full key=value; token is consumed by
+    // Tern's parameter parser. If its semicolon falls outside the next
+    // packet's body budget, the full-sized cut is already safe (including
+    // unbroken ASCII runs). Only retreat when it would really be parsed.
+    const nextUnsafe = (candidate: number): boolean => {
+      const semi = chars.indexOf(';', candidate)
+      if (semi < 0 || (offsets.at(semi + 1) ?? 0) - (offsets.at(candidate) ?? 0) > budget) {
+        return false
       }
-      while (cut > start + 1 && nextUnsafe(cut)) cut -= 1
-      if (nextUnsafe(cut)) throw new RangeError('No safe TSP continuation boundary')
+      return PARAM_PATTERN.test(chars.slice(candidate, semi).join(''))
     }
+    let cut = end
+    while (cut > start + 1 && nextUnsafe(cut)) cut -= 1
+    if (nextUnsafe(cut)) throw new RangeError('No safe TSP continuation boundary')
+
     chunks.push(chars.slice(start, cut).join(''))
     start = cut
   }
