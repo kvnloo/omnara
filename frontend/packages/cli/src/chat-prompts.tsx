@@ -1,5 +1,5 @@
 import type { AgentInteraction, InteractionAnswer } from '@omnara/sdk'
-import { Box, Text, useInput } from 'ink'
+import { Box, Text, useInput, usePaste } from 'ink'
 import { useEffect, useRef, useState } from 'react'
 
 export function Label({ name, color }: { name: string; color: string }) {
@@ -42,24 +42,42 @@ export function TextInput({
     onChange(next)
   }
 
-  useInput((input, key) => {
+  const submit = (): void => {
     const current = textRef.current
-    if (key.return) {
-      textRef.current = ''
-      // The parent clears its controlled value on submission. Until that
-      // renders, earlier pending edits must not repopulate the next draft.
-      pendingRef.current = ''
-      onSubmit(current)
+    textRef.current = ''
+    // The parent clears its controlled value on submission. Until that
+    // renders, earlier pending edits must not repopulate the next draft.
+    pendingRef.current = ''
+    onSubmit(current)
+  }
+
+  useInput((input, key) => {
+    if (key.return || input === '\n') {
+      submit()
       return
     }
     if (key.backspace || key.delete) {
-      change(dropLastGrapheme(current))
+      change(dropLastGrapheme(textRef.current))
       return
     }
     if (key.ctrl || key.meta || key.escape || key.tab) return
     if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) return
     if (key.pageUp || key.pageDown) return
-    change(current + input)
+
+    // Ink 8 may deliver several ordinary keys and Enter in one readable
+    // chunk. Only the Ink key channel treats CR/LF as submission; paste is
+    // handled separately below so pasted newlines stay literal.
+    if (input.includes('\r') || input.includes('\n')) {
+      for (const part of input.split(/(\r\n|\r|\n)/u)) {
+        if (part === '\r' || part === '\n' || part === '\r\n') submit()
+        else if (part !== '') change(textRef.current + part)
+      }
+      return
+    }
+    if (input !== '') change(textRef.current + input)
+  })
+  usePaste((pasted) => {
+    change(textRef.current + pasted)
   })
   return (
     <Text>

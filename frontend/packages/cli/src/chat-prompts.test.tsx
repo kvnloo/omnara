@@ -127,4 +127,41 @@ describe('Ink fallback composer receives real PTY input', () => {
       fixture.dispose()
     }
   })
+
+  it('submits each Enter in one coalesced Ink input read without losing either prompt', async () => {
+    const onSend = vi.fn()
+    const fixture = mount(onSend)
+    try {
+      await vi.waitFor(() => {
+        expect(fixture.source.isRaw).toBe(true)
+      })
+      fixture.source.write('first\rsecond\r')
+      await vi.waitFor(() => {
+        expect(onSend).toHaveBeenCalledTimes(2)
+        expect(onSend).toHaveBeenNthCalledWith(1, 'first')
+        expect(onSend).toHaveBeenNthCalledWith(2, 'second')
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('keeps carriage returns inside an Ink bracketed paste literal until a later Enter', async () => {
+    const onSend = vi.fn()
+    const fixture = mount(onSend)
+    try {
+      await vi.waitFor(() => {
+        expect(fixture.source.isRaw).toBe(true)
+      })
+      fixture.source.write('\x1b[200~line one\r\n世界\x1b[201~')
+      expect(onSend).not.toHaveBeenCalled()
+      fixture.source.write('\r')
+      await vi.waitFor(() => {
+        expect(onSend).toHaveBeenCalledTimes(1)
+        expect(onSend).toHaveBeenCalledWith('line one\r\n世界')
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
 })

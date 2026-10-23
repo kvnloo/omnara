@@ -38,11 +38,12 @@ class OwnedPty:
             # pty.fork gives the child a controlling OS tty on all 3 stdio fds.
             # In particular, process.stdin.setRawMode is the real tty method.
             try:
+                # Ink 8 suppresses interactive frames and suspend/resume when CI=1.
+                # This child owns a genuine controlling PTY, so use tty rendering.
                 os.execve(node, [node, tsx, lab, "--trace-sdk", "--assert-pty"], {
                     "PATH": os.environ.get("PATH", ""),
                     "TERM": "xterm-256color",
                     "NO_COLOR": "1",
-                    "CI": "1",
                     "OMNARA_TERN_NATIVE": "1",
                     "OMNARA_TERN_LIVE": "0",
                 })

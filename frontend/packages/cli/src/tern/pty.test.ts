@@ -27,7 +27,6 @@ describe('real OS PTY Omnara chat input', () => {
         PATH: process.env.PATH,
         TERM: 'xterm-256color',
         NO_COLOR: '1',
-        CI: '1',
       },
     })
     expect(stdout).toContain('Real OS PTY native input proof passed')
