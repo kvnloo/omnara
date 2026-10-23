@@ -390,7 +390,7 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     )
     try {
       await activate(fixture)
-      fixture.source.write('same' + '\r')
+      fixture.source.write('same\r')
       fixture.source.write(send('same'))
       await vi.waitFor(() => {
         expect(sent).toEqual(['same', 'same'])
