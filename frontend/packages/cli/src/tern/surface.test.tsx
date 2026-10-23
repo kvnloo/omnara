@@ -27,7 +27,11 @@ class FakeTty extends PassThrough {
   }
 }
 
-type Mode = { enabled: boolean; idle: boolean; liveProjectionEnabled: boolean }
+interface Mode {
+  enabled: boolean
+  idle: boolean
+  liveProjectionEnabled: boolean
+}
 interface Props extends Mode {
   terminal: TernTerminal
   onSend: (text: string) => Promise<void>
