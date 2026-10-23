@@ -55,10 +55,23 @@ cd ..
 make web-static-check
 ```
 
-These checks are not a native terminal acceptance receipt. Exercise the real
-CLI against a controlled fixture under an owned Tern/pty session, including
-atomic multiline/Unicode send, busy/idle handoff, interactions, resize, focus,
-theme, reconnect and terminal exit.
+These checks are not a native terminal acceptance receipt. To run the real
+`runChat` CLI, `@omnara/sdk` client, and `@omnara/react` hooks against a
+self-contained, credential-free loopback HTTP/SSE fixture inside Tern:
+
+```sh
+cd frontend
+pnpm --filter omnara exec tsx src/tern/lab.ts
+pnpm --filter omnara exec tsx src/tern/lab.ts --tern-live
+```
+
+The second command enables live transcript and direct-subagent projection. Send
+`/ask` for an Ink-owned fixture interaction, or ordinary multilingual/multiline
+text for a delayed synthetic turn. The lab binds only to 127.0.0.1 and makes
+no provider calls. Exercise both modes in an owned Tern/pty session, including
+atomic send exactly once, busy/idle handoff, interactions, resize, focus, theme,
+reconnect, eviction/error fallback and terminal exit. Protocol fixtures and
+mounted Ink tests are not proof of actual native Tern behavior.
 
 Tern/TSP and the original OMP native-presentation work: **Can Bölük /
 Stencil Labs**. The native seam follows the Hermes × Tern contributors'

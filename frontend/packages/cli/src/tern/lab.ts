@@ -34,9 +34,19 @@ const agent = {
   project_id: scope.projectID,
   name: 'Tern Loopback Fixture',
   state: 'active' as const,
-  activity: { state: 'idle' as 'idle' | 'running' | 'waiting_on_interaction', last_activity_at: timestamp() },
+  activity: {
+    state: 'idle' as 'idle' | 'running' | 'waiting_on_interaction',
+    last_activity_at: timestamp(),
+  },
   created_at: timestamp(),
   updated_at: timestamp(),
+}
+const childAgent = {
+  ...agent,
+  id: fixtureId('agt', 2),
+  name: 'Loopback direct subagent',
+  parent_agent_id: scope.agentID,
+  subagent_key: 'native-lab',
 }
 
 interface EventRecord {
@@ -112,7 +122,10 @@ const server = createServer(async (req, res) => {
       return
     }
     if (req.method === 'GET' && path === root) {
-      json(res, 200, { data: url.searchParams.has('parent_agent_id') ? [] : [agent], next_cursor: null })
+      json(res, 200, {
+        data: url.searchParams.has('parent_agent_id') ? [childAgent] : [agent],
+        next_cursor: null,
+      })
       return
     }
     if (req.method === 'GET' && path === agentPath + '/events') {
@@ -134,7 +147,9 @@ const server = createServer(async (req, res) => {
         'X-Accel-Buffering': 'no',
       })
       streams.add(res)
-      const after = Number(req.headers['last-event-id'] ?? url.searchParams.get('after_sequence') ?? '0')
+      const after = Number(
+        req.headers['last-event-id'] ?? url.searchParams.get('after_sequence') ?? '0',
+      )
       for (const event of events) {
         if (event.sequence > after) res.write('data: ' + JSON.stringify(event) + '\n\n')
       }
@@ -158,10 +173,8 @@ const server = createServer(async (req, res) => {
       }
       const blocks = parsed.data.content_blocks
       const text = blocks
-        .filter((block) =>
-          block.type === 'text' && block.metadata?.omnara_hidden !== 'true',
-        )
-        .map((block) => block.type === 'text' ? block.text : '')
+        .filter((block) => block.type === 'text' && block.metadata?.omnara_hidden !== 'true')
+        .map((block) => (block.type === 'text' ? block.text : ''))
         .join('\n')
       const inputID = fixtureId('ain', turn + 1)
       const createdAt = timestamp()
@@ -203,7 +216,9 @@ const server = createServer(async (req, res) => {
           state: 'open',
           request: {
             title: 'Loopback approval simulation',
-            questions: [{ prompt: 'Continue the fixture turn?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+            questions: [
+              { prompt: 'Continue the fixture turn?', options: [{ label: 'Yes' }, { label: 'No' }] },
+            ],
           },
           created_at: timestamp(),
         }
@@ -223,8 +238,11 @@ const server = createServer(async (req, res) => {
       }
       return
     }
-    if (req.method === 'POST' && interaction != null &&
-      path === agentPath + '/interactions/' + interaction.id + '/resolve') {
+    if (
+      req.method === 'POST' &&
+      interaction != null &&
+      path === agentPath + '/interactions/' + interaction.id + '/resolve'
+    ) {
       const parsed = schemas.zResolveAgentInteractionBody.safeParse(await requestBody(req))
       if (!parsed.success) {
         json(res, 400, { error: 'Invalid interaction answers', code: 'invalid_argument' })
@@ -250,7 +268,12 @@ const server = createServer(async (req, res) => {
     json(res, 404, { error: 'Unknown fixture route', code: 'not_found' })
   } catch (error) {
     if (res.headersSent) res.destroy(error instanceof Error ? error : undefined)
-    else json(res, error instanceof RangeError ? 413 : 400, { error: 'Invalid fixture request', code: 'invalid_argument' })
+    else {
+      json(res, error instanceof RangeError ? 413 : 400, {
+        error: 'Invalid fixture request',
+        code: 'invalid_argument',
+      })
+    }
   }
 })
 
@@ -268,9 +291,14 @@ async function main(): Promise<void> {
   const address = server.address()
   if (address == null || typeof address === 'string') throw new Error('Fixture port unavailable')
   const baseUrl = `http://127.0.0.1:${address.port}/v1`
-  process.stderr.write('Omnara/Tern loopback fixture at ' + baseUrl +
-    ' (local only; no credentials or model calls)\n')
-  process.stderr.write('Send text, emoji or multiline. Send /ask for an Ink-owned interaction. Quit with /quit or Ctrl-C.\n')
+  process.stderr.write(
+    'Omnara/Tern loopback fixture at ' + baseUrl +
+      ' (local only; no credentials or model calls)\n',
+  )
+  process.stderr.write(
+    'Send text, emoji or multiline. Send /ask for an Ink-owned interaction. ' +
+      'Quit with /quit or Ctrl-C.\n',
+  )
   try {
     const client = createOmnaraClient({ baseUrl })
     await runChat(
