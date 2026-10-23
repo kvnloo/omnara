@@ -14,7 +14,10 @@ export const agentChatOp = customOp({
   path: schemas.zListAgentsPath,
   configure: (command) => {
     command.argument('[agent-id]')
-    command.option('--tern-live', 'opt in to native transcript, tools, backlog and direct subagents')
+    command.option(
+      '--tern-live',
+      'opt in to native transcript, tools, backlog and direct subagents',
+    )
     command.option('--no-tern', 'keep all chat presentation in Ink')
   },
   run: async ({ client, path, args, options }) => {
