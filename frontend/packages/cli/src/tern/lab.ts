@@ -6,9 +6,11 @@
  * provider, credential, external network, or shell execution.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
 
 import { createOmnaraClient } from '@omnara/sdk'
 import * as schemas from '@omnara/sdk/zod'
+import type * as z from 'zod'
 
 import { runChat } from '../chat.tsx'
 import { resolveTernPresentation } from './config.ts'
@@ -28,19 +30,20 @@ const scope = {
 const root = `/v1/orgs/${scope.orgID}/projects/${scope.projectID}/agents`
 const agentPath = root + '/' + scope.agentID
 const timestamp = (): string => new Date().toISOString()
+const activity: z.infer<typeof schemas.zAgentActivity> = {
+  state: 'idle',
+  last_activity_at: timestamp(),
+}
 const agent = {
   id: scope.agentID,
   org_id: scope.orgID,
   project_id: scope.projectID,
   name: 'Tern Loopback Fixture',
-  state: 'active' as const,
-  activity: {
-    state: 'idle' as 'idle' | 'running' | 'waiting_on_interaction',
-    last_activity_at: timestamp(),
-  },
+  state: 'active',
+  activity,
   created_at: timestamp(),
   updated_at: timestamp(),
-}
+} satisfies z.infer<typeof schemas.zAgent>
 const childAgent = {
   ...agent,
   id: fixtureId('agt', 2),
@@ -49,48 +52,35 @@ const childAgent = {
   subagent_key: 'native-lab',
 }
 
-interface EventRecord {
-  event_kind: string
+interface StoredEvent {
   sequence: number
-  [key: string]: unknown
+  payload: string
 }
-interface InteractionRecord {
-  id: string
-  org_id: string
-  project_id: string
-  agent_id: string
-  tool_call_id: string
-  interaction_kind: 'question'
-  state: 'open' | 'resolved'
-  request: { title: string; questions: { prompt: string; options: { label: string }[] }[] }
-  created_at: string
-  resolution?: { answers: { option_indices: number[]; text?: string }[] }
-  resolved_at?: string
-}
-const events: EventRecord[] = []
+const events: StoredEvent[] = []
 const streams = new Set<ServerResponse>()
-let interaction: InteractionRecord | undefined
+let interaction: z.infer<typeof schemas.zAgentInteraction> | undefined
 let sequence = 0
 let turn = 0
 const responseTimers = new Set<ReturnType<typeof setTimeout>>()
 
-function json(res: ServerResponse, status: number, value: unknown): void {
+function json(res: ServerResponse, status: number, payload: string): void {
   res.writeHead(status, { 'Content-Type': 'application/json' })
-  res.end(JSON.stringify(value))
+  res.end(payload)
 }
 
-function broadcast(event: EventRecord | object): void {
-  if ('event_kind' in event && 'sequence' in event) events.push(event as EventRecord)
-  for (const stream of streams) stream.write('data: ' + JSON.stringify(event) + '\n\n')
+function broadcast(payload: string, sequence?: number): void {
+  if (sequence != null) events.push({ sequence, payload })
+  for (const stream of streams) stream.write('data: ' + payload + '\n\n')
 }
 
-async function requestBody(req: IncomingMessage): Promise<unknown> {
+async function requestBody(req: IncomingMessage): Promise<string> {
   let text = ''
   for await (const chunk of req) {
-    text += (chunk as Buffer).toString('utf8')
+    if (!Buffer.isBuffer(chunk)) throw new TypeError('Expected buffered HTTP input')
+    text += chunk.toString('utf8')
     if (Buffer.byteLength(text, 'utf8') > 1_048_576) throw new RangeError('Fixture input too large')
   }
-  return JSON.parse(text)
+  return text
 }
 
 function completeTurn(turnIndex: number, input: string): void {
@@ -109,34 +99,38 @@ function completeTurn(turnIndex: number, input: string): void {
     content_blocks: [{ type: 'text' as const, text: 'Fixture echo: ' + input }],
     created_at: timestamp(),
   }
-  agent.activity.state = 'idle'
-  broadcast(evt)
+  activity.state = 'idle'
+  broadcast(JSON.stringify(evt), evt.sequence)
 }
 
-const server = createServer(async (req, res) => {
+const server = createServer((req, res) => {
+  void respond(req, res)
+})
+
+async function respond(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
     if (req.method === 'GET' && path === agentPath) {
-      json(res, 200, { agent, machine_ids: [], mcp_connections: [] })
+      json(res, 200, JSON.stringify({ agent, machine_ids: [], mcp_connections: [] }))
       return
     }
     if (req.method === 'GET' && path === root) {
-      json(res, 200, {
+      json(res, 200, JSON.stringify({
         data: url.searchParams.has('parent_agent_id') ? [childAgent] : [agent],
         next_cursor: null,
-      })
+      }))
       return
     }
     if (req.method === 'GET' && path === agentPath + '/events') {
       const before = Number(url.searchParams.get('before_sequence') ?? '0')
       const page = before > 0 ? events.filter((event) => event.sequence < before) : events
-      json(res, 200, {
+      json(res, 200, JSON.stringify({
         data: page.slice(-100),
         next_after_sequence: sequence,
         next_before_sequence: null,
         has_more: false,
-      })
+      }))
       return
     }
     if (req.method === 'GET' && path === agentPath + '/events/stream') {
@@ -151,24 +145,26 @@ const server = createServer(async (req, res) => {
         req.headers['last-event-id'] ?? url.searchParams.get('after_sequence') ?? '0',
       )
       for (const event of events) {
-        if (event.sequence > after) res.write('data: ' + JSON.stringify(event) + '\n\n')
+        if (event.sequence > after) res.write('data: ' + event.payload + '\n\n')
       }
       res.write(': fixture connected\n\n')
-      res.on('close', () => streams.delete(res))
+      res.on('close', () => {
+        streams.delete(res)
+      })
       return
     }
     if (req.method === 'GET' && path === agentPath + '/inputs/backlog') {
-      json(res, 200, { data: [], next_cursor: null })
+      json(res, 200, JSON.stringify({ data: [], next_cursor: null }))
       return
     }
     if (req.method === 'GET' && path === agentPath + '/interactions') {
-      json(res, 200, { data: interaction?.state === 'open' ? [interaction] : [], next_cursor: null })
+      json(res, 200, JSON.stringify({ data: interaction?.state === 'open' ? [interaction] : [], next_cursor: null }))
       return
     }
     if (req.method === 'POST' && path === agentPath + '/inputs') {
-      const parsed = schemas.zCreateAgentInputBody.safeParse(await requestBody(req))
+      const parsed = schemas.zCreateAgentInputBody.safeParse(JSON.parse(await requestBody(req)))
       if (!parsed.success) {
-        json(res, 400, { error: 'Invalid input body', code: 'invalid_argument' })
+        json(res, 400, JSON.stringify({ error: 'Invalid input body', code: 'invalid_argument' }))
         return
       }
       const blocks = parsed.data.content_blocks
@@ -188,8 +184,8 @@ const server = createServer(async (req, res) => {
         queued_at: createdAt,
       }
       const currentTurn = ++turn
-      agent.activity.state = 'running'
-      broadcast({
+      activity.state = 'running'
+      broadcast(JSON.stringify({
         id: fixtureId('evt', ++sequence),
         org_id: scope.orgID,
         project_id: scope.projectID,
@@ -203,10 +199,10 @@ const server = createServer(async (req, res) => {
         input_kind: 'content',
         content_blocks: blocks,
         created_at: createdAt,
-      })
-      json(res, 201, { agent_input: input })
+      }), sequence)
+      json(res, 201, JSON.stringify({ agent_input: input }))
       if (text.trim().startsWith('/ask')) {
-        interaction = {
+        interaction = schemas.zAgentInteraction.parse({
           id: fixtureId('int', currentTurn),
           org_id: scope.orgID,
           project_id: scope.projectID,
@@ -221,14 +217,14 @@ const server = createServer(async (req, res) => {
             ],
           },
           created_at: timestamp(),
-        }
-        agent.activity.state = 'waiting_on_interaction'
-        broadcast({
+        })
+        activity.state = 'waiting_on_interaction'
+        broadcast(JSON.stringify({
           tool_call_id: interaction.tool_call_id,
           agent_id: scope.agentID,
           state: 'waiting',
           interaction_update: { id: interaction.id, interaction_kind: 'question', state: 'open' },
-        })
+        }))
       } else {
         const timer = setTimeout(() => {
           responseTimers.delete(timer)
@@ -243,39 +239,43 @@ const server = createServer(async (req, res) => {
       interaction != null &&
       path === agentPath + '/interactions/' + interaction.id + '/resolve'
     ) {
-      const parsed = schemas.zResolveAgentInteractionBody.safeParse(await requestBody(req))
+      const parsed = schemas.zResolveAgentInteractionBody.safeParse(JSON.parse(await requestBody(req)))
       if (!parsed.success) {
-        json(res, 400, { error: 'Invalid interaction answers', code: 'invalid_argument' })
+        json(res, 400, JSON.stringify({ error: 'Invalid interaction answers', code: 'invalid_argument' }))
         return
       }
-      const resolved = {
+      const resolved = schemas.zAgentInteraction.parse({
         ...interaction,
-        state: 'resolved' as const,
-        resolution: parsed.data,
+        state: 'resolved',
+        resolution: { answers: parsed.data.answers },
         resolved_at: timestamp(),
-      }
-      interaction = resolved as InteractionRecord
-      json(res, 200, resolved)
-      broadcast({
+      })
+      interaction = resolved
+      json(res, 200, JSON.stringify(resolved))
+      broadcast(JSON.stringify({
         tool_call_id: interaction.tool_call_id,
         agent_id: scope.agentID,
         state: 'completed',
         interaction_update: { id: interaction.id, interaction_kind: 'question', state: 'resolved' },
-      })
+      }))
       completeTurn(turn, 'interaction resolved')
       return
     }
-    json(res, 404, { error: 'Unknown fixture route', code: 'not_found' })
+    json(res, 404, JSON.stringify({ error: 'Unknown fixture route', code: 'not_found' }))
   } catch (error) {
     if (res.headersSent) res.destroy(error instanceof Error ? error : undefined)
     else {
-      json(res, error instanceof RangeError ? 413 : 400, {
+      json(res, error instanceof RangeError ? 413 : 400, JSON.stringify({
         error: 'Invalid fixture request',
         code: 'invalid_argument',
-      })
+      }))
     }
   }
-})
+}
+
+function isTcpAddress(value: string | AddressInfo | null): value is AddressInfo {
+  return value != null && typeof value !== 'string'
+}
 
 async function main(): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -289,7 +289,7 @@ async function main(): Promise<void> {
     })
   })
   const address = server.address()
-  if (address == null || typeof address === 'string') throw new Error('Fixture port unavailable')
+  if (!isTcpAddress(address)) throw new Error('Fixture port unavailable')
   const baseUrl = `http://127.0.0.1:${address.port}/v1`
   process.stderr.write(
     'Omnara/Tern loopback fixture at ' + baseUrl +
@@ -316,7 +316,13 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((error: unknown) => {
-  process.stderr.write('Native fixture failed: ' + String(error) + '\n')
-  process.exitCode = 1
-})
+async function start(): Promise<void> {
+  try {
+    await main()
+  } catch (error) {
+    process.stderr.write('Native fixture failed: ' + String(error) + '\n')
+    process.exitCode = 1
+  }
+}
+
+void start()
