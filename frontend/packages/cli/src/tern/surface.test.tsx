@@ -133,6 +133,32 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     }
   })
 
+  it('does not drop a distinct atomic send while the previous send promise is pending', async () => {
+    const sends: string[] = []
+    const complete: Array<() => void> = []
+    const fixture = mount(
+      { enabled: true, idle: true, liveProjectionEnabled: false },
+      (text) => {
+        sends.push(text)
+        return new Promise<void>((resolve) => {
+          complete.push(resolve)
+        })
+      },
+    )
+    try {
+      await activate(fixture)
+      fixture.source.write(send('first 🌿'))
+      fixture.source.write(send('first 🌿'))
+      fixture.source.write(send('second 世界'))
+      await vi.waitFor(() => {
+        expect(sends).toEqual(['first 🌿', 'second 世界'])
+      })
+    } finally {
+      for (const resolve of complete) resolve()
+      fixture.dispose()
+    }
+  })
+
   it('closes idle native ownership during work and an interaction, then resumes', async () => {
     const onSend = vi.fn((_text: string) => Promise.resolve())
     const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, onSend)
