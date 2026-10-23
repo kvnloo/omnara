@@ -55,6 +55,23 @@ cd ..
 make web-static-check
 ```
 
+The focused **kernel PTY regression** (POSIX + Python 3 standard library, no
+providers or credentials) is included in `pnpm --filter omnara test`. Run it
+separately to isolate raw tty and UTF-8 input failures:
+
+```sh
+cd frontend
+pnpm --filter omnara exec vitest run src/tern/pty.test.ts
+```
+
+It forks a real OS PTY, launches `runChat` with the real React hooks and SDK
+against the existing localhost fixture, and checks fragmented UTF-8 input,
+batched ordinary keys, bracketed multiline paste, interleaved APCs, `/ask`,
+the Ink-owned question and cooked quit at the exact SDK boundary. The owned
+peer only supplies TSP hello/ACK; **it is not the Tern application**. The
+test is skipped on Windows or when Python 3 is unavailable. Install Python 3
+before accepting this gate.
+
 These checks are not a native terminal acceptance receipt. To run the real
 `runChat` CLI, `@omnara/sdk` client, and `@omnara/react` hooks against a
 self-contained, credential-free loopback HTTP/SSE fixture inside Tern:

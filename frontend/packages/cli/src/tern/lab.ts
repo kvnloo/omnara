@@ -295,6 +295,9 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
       })
       interaction = resolved
       interactionsResolved += 1
+      if (process.argv.includes('--trace-sdk')) {
+        process.stderr.write('Omnara lab interaction resolved\n')
+      }
       json(res, 200, JSON.stringify(resolved))
       broadcast(
         JSON.stringify({
@@ -378,6 +381,22 @@ async function main(): Promise<void> {
       process.stderr.write(
         'Native /ask proof: one exact SDK POST, interaction opened and resolved; TTY cooked.\n',
       )
+    }
+    if (process.argv.includes('--assert-pty')) {
+      const expected = ['hè 🌍 第二行', 'rapid keys', 'line one\n世界\n第三行', '/ask']
+      if (
+        sdkPosts.length !== expected.length ||
+        sdkPosts.some((text, index) => text !== expected[index]) ||
+        interactionsOpened !== 1 ||
+        interactionsResolved !== 1
+      ) {
+        throw new Error(
+          'Native PTY proof failed: posts=' + JSON.stringify(sdkPosts) +
+            ', opened=' + String(interactionsOpened) +
+            ', resolved=' + String(interactionsResolved),
+        )
+      }
+      process.stderr.write('Native PTY proof: exact SDK inputs and interaction; TTY cooked.\n')
     }
   } finally {
     for (const timer of responseTimers) clearTimeout(timer)
