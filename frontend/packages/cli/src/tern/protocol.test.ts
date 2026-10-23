@@ -10,6 +10,7 @@ import {
   decodeTspEvent,
   decodeTspHello,
   encodeTspHelloQuery,
+  encodeTspMessage,
   parseTspApc,
   type TspJson,
 } from './protocol.ts'
@@ -102,13 +103,17 @@ describe('composer parity', () => {
 })
 
 describe('bounded TSP framing and event reassembly', () => {
-  it('counts escape headers in the negotiated APC byte limit', async () => {
-    const { encodeTspMessage } = await import('./protocol.ts')
+  it('bounds the negotiated JSON body bytes, not the envelope', () => {
     const wire = encodeTspMessage('f', '🌿'.repeat(200), 128)
     const st = String.fromCharCode(27, 92)
     const frames = wire.split(st).filter(Boolean).map((part) => part + st)
     expect(frames.length).toBeGreaterThan(1)
-    for (const packet of frames) expect(Buffer.byteLength(packet, 'utf8')).toBeLessThanOrEqual(128)
+    for (const packet of frames) {
+      const payload = packet.slice(2, -2)
+      const parsed = parseTspApc(payload)
+      expect(Buffer.byteLength(parsed?.body ?? '', 'utf8')).toBeLessThanOrEqual(128)
+      expect(Buffer.byteLength(packet, 'utf8')).toBeLessThanOrEqual(262_144)
+    }
     expect(() => encodeTspMessage('f', 'hi', 20)).toThrow(RangeError)
   })
 
@@ -166,5 +171,61 @@ describe('native ACK ownership', () => {
     transport.handleEvent({ ev: 'ack', sf: TERN_SURFACE_ID, s: 1 })
     expect(writes).toHaveLength(3)
     expect(writes[2]).toContain('later')
+  })
+})
+
+/**
+ * Independent fixture of Tern's full documented parameter grammar; unlike
+ * parseTspApc, this consumes *any* key=value; prefix, not just c/m.
+ * A fixture is not a real Tern executable.
+ */
+function parseLikeTern(raw: string) {
+  const prefix = 'tsp;'
+  if (!raw.startsWith(prefix)) throw new Error('not tsp')
+  const rest = raw.slice(prefix.length)
+  const separator = rest.indexOf(';')
+  const verb = rest.slice(0, separator)
+  let pos = separator + 1
+  const params: Record<string, string> = {}
+  for (;;) {
+    const end = rest.indexOf(';', pos)
+    if (end < 0) break
+    const segment = rest.slice(pos, end)
+    if (!/^[A-Za-z0-9_-]+=[\x21-\x3a\x3c-\x7e]*$/.test(segment)) break
+    const eq = segment.indexOf('=')
+    params[segment.slice(0, eq)] = segment.slice(eq + 1)
+    pos = end + 1
+  }
+  return { verb, params, body: rest.slice(pos) }
+}
+
+describe('continuation boundaries under the full Tern wire grammar', () => {
+  it('round-trips adversarial parameter-shaped prefixes and UTF-8 over chunk boundaries', () => {
+    const input = { sf: 'omnara:session', s: 7,
+      ops: [['set', 'omnara:composer', { text: 'a'.repeat(122) + 'x=1;y=2;\n🌿👍🏽' .repeat(70) }]] }
+    const body = JSON.stringify(input)
+    const wire = encodeTspMessage('f', body, 128)
+    const packets = wire.split('\x1b\\').filter(Boolean).map((part) => part.slice(2))
+    expect(packets.length).toBeGreaterThan(2)
+    let joined = ''
+    for (const packet of packets) {
+      const decoded = parseLikeTern(packet)
+      expect(decoded.verb).toBe('f')
+      expect(decoded.params.x).toBeUndefined()
+      expect(decoded.params.y).toBeUndefined()
+      expect(Buffer.byteLength(decoded.body, 'utf8')).toBeLessThanOrEqual(128)
+      joined += decoded.body
+    }
+    expect(joined).toBe(body)
+    expect(JSON.parse(joined)).toEqual(input)
+  })
+
+  it('handles a long ASCII run bordering a key=value; segment without content loss', () => {
+    const text = 'x'.repeat(250) + '=1;y'.repeat(75) + '🍃'.repeat(40)
+    const body = JSON.stringify({ text })
+    const packets = encodeTspMessage('f', body, 128).split('\x1b\\').filter(Boolean)
+    const joined = packets.map((s) => parseLikeTern(s.slice(2)).body).join('')
+    expect(joined).toBe(body)
+    expect(JSON.parse(joined).text).toBe(text)
   })
 })

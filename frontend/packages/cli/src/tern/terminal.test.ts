@@ -2,13 +2,15 @@ import { PassThrough } from 'node:stream'
 
 import { describe, expect, it } from 'vitest'
 
+import { applyTernComposerEdit } from './composer.ts'
+import { applyTernComposerKey, TernComposerKeyDecoder } from './keys.ts'
 import { TernTerminal, TspInputDecoder } from './terminal.ts'
 
 describe('TSP stdin filtering', () => {
   it('removes TSP APC frames while preserving ordinary terminal input', () => {
     const decoder = new TspInputDecoder()
     const first = decoder.push('ab\x1b_tsp;e;{"ev":"theme"')
-    expect(first).toEqual({ input: 'ab', tsp: [] })
+    expect(first).toEqual({ input: 'ab', tsp: [], parts: [{ kind: 'input', data: 'ab' }] })
 
     const second = decoder.push(',"dark":true}\x1b\\cd')
     expect(second.input).toBe('cd')
@@ -17,8 +19,19 @@ describe('TSP stdin filtering', () => {
 
   it('preserves a split marker until it can decide whether it is TSP', () => {
     const decoder = new TspInputDecoder()
-    expect(decoder.push('x\x1b_ts')).toEqual({ input: 'x', tsp: [] })
-    expect(decoder.push('p;e;{}\x1b\\y')).toEqual({ input: 'y', tsp: ['tsp;e;{}'] })
+    expect(decoder.push('x\x1b_ts')).toEqual({
+      input: 'x',
+      tsp: [],
+      parts: [{ kind: 'input', data: 'x' }],
+    })
+    expect(decoder.push('p;e;{}\x1b\\y')).toEqual({
+      input: 'y',
+      tsp: ['tsp;e;{}'],
+      parts: [
+        { kind: 'tsp', payload: 'tsp;e;{}' },
+        { kind: 'input', data: 'y' },
+      ],
+    })
   })
 })
 
@@ -136,7 +149,125 @@ describe('ordinary terminal compatibility', () => {
     expect(decoder.push('hello' + String.fromCharCode(27) + '_tsp;e;{"ev":"send"')).toEqual({
       input: 'hello',
       tsp: [],
+      parts: [{ kind: 'input', data: 'hello' }],
     })
     expect(decoder.flush()).toBe('')
+  })
+})
+
+const eventApc = (data: object) => '\x1b_tsp;e;' + JSON.stringify(data) + '\x1b\\'
+const helloApc = (kinds: string[] = ['col', 'editor']) =>
+  '\x1b_tsp;r;' + JSON.stringify({ r: 'hello', v: 1, term: 'tern', kinds }) + '\x1b\\'
+
+describe('mixed APC and pty key ordering', () => {
+  it('applies a typed key followed by a native selection edit in one read', () => {
+    const source = new RawTtyInput()
+    const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
+    terminal.probe()
+    source.write(helloApc())
+    const decoder = new TernComposerKeyDecoder()
+    let draft = ''
+    terminal.subscribeKeys((input) => {
+      for (const key of decoder.push(input)) {
+        if (key.kind === 'text' || key.kind === 'backspace') {
+          draft = applyTernComposerKey({ text: draft, cursor: draft.length }, key).text
+        }
+      }
+    })
+    terminal.subscribeEvents((event) => {
+      if (event.ev !== 'edit') return
+      const next = applyTernComposerEdit(draft, event)
+      if (next) draft = next.text
+    })
+    terminal.beginNativeOwnership()
+
+    const edit = { ev: 'edit', sf: 'omnara:session', id: 'omnara:composer',
+      from: 0, to: 1, text: 'b', cursor: 1, len: 1 }
+    source.write('a' + eventApc(edit))
+    expect(draft).toBe('b')
+    source.write(eventApc({ ...edit, from: 1, to: 1, text: '🌿', cursor: 3, len: 1 }) + 'c')
+    expect(draft).toBe('b🌿c')
+    terminal.dispose()
+  })
+
+  it('keeps order across fragmented markers and alternating events/keys', () => {
+    const source = new RawTtyInput()
+    const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
+    terminal.probe()
+    source.write(helloApc())
+    const calls: string[] = []
+    terminal.subscribeKeys((s) => calls.push('key:' + s))
+    terminal.subscribeEvents((e) => calls.push('event:' + e.ev))
+    terminal.beginNativeOwnership()
+    const edit = eventApc({ ev: 'edit', sf: 'omnara:session', id: 'omnara:composer',
+      from: 0, to: 0, text: 'b', cursor: 1, len: 0 })
+    source.write(edit.slice(0, 5))
+    source.write(edit.slice(5) + 'a\x1b_ts')
+    source.write('p;e;{"ev":"theme","dark":true}\x1b\\z')
+    expect(calls).toEqual(['event:edit', 'key:a', 'event:theme', 'key:z'])
+    terminal.dispose()
+  })
+})
+
+describe('partial acquisition and rejected surface restoration', () => {
+  it('returns to cooked Ink input when paste-enable throws after raw mode', () => {
+    const source = new RawTtyInput()
+    const ink: string[] = []
+    const terminal = new TernTerminal(source, {
+      isTTY: true,
+      write: (data) => {
+        if (data === '\x1b[?2004h') throw new Error('tty output failed')
+      },
+    })
+    terminal.stdin.on('data', (data: Buffer) => ink.push(data.toString()))
+    expect(() => terminal.beginNativeOwnership()).toThrow('tty output failed')
+    expect(source.isRaw).toBe(false)
+    expect(source.refs).toBe(0)
+    source.write('ordinary input')
+    expect(ink.join('')).toBe('ordinary input')
+    terminal.dispose()
+  })
+
+  it('restores input after paste-disable fails and a surface is evicted', () => {
+    const source = new RawTtyInput()
+    const ink: string[] = []
+    const terminal = new TernTerminal(source, {
+      isTTY: true,
+      write: (data) => {
+        if (data === '\x1b[?2004l') throw new Error('paste cleanup failed')
+      },
+    })
+    terminal.stdin.on('data', (data: Buffer) => ink.push(data.toString()))
+    terminal.probe()
+    source.write(helloApc())
+    terminal.beginNativeOwnership()
+    source.write(eventApc({ ev: 'gone', sf: 'omnara:session', ids: ['omnara:session'] }) + 'next')
+    expect(terminal.getSnapshot().status).toBe('unsupported')
+    expect(source.isRaw).toBe(false)
+    expect(ink.join('')).toBe('next')
+    terminal.dispose()
+  })
+
+  it('receives resize/theme/focus while active; fresh terminal can renegotiate', () => {
+    const source = new RawTtyInput()
+    const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
+    const calls: string[] = []
+    terminal.subscribeEvents((event) => calls.push(event.ev))
+    terminal.probe()
+    source.write(helloApc())
+    source.write(eventApc({ ev: 'resize', sf: 'omnara:session', cols: 90, visible: false }))
+    source.write(eventApc({ ev: 'theme', dark: false }))
+    source.write(eventApc({ ev: 'focus', sf: 'omnara:session', id: 'omnara:composer' }))
+    expect(calls).toEqual(['resize', 'theme', 'focus'])
+    source.write(eventApc({ ev: 'error', sf: 'omnara:session', msg: 'surface rejected' }))
+    expect(terminal.getSnapshot().status).toBe('unsupported')
+    terminal.dispose()
+
+    const nextSource = new RawTtyInput()
+    const restarted = new TernTerminal(nextSource, { isTTY: true, write: () => undefined })
+    restarted.probe()
+    nextSource.write(helloApc())
+    expect(restarted.getSnapshot().status).toBe('active')
+    restarted.dispose()
   })
 })
