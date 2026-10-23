@@ -100,3 +100,34 @@ describe('composer parity', () => {
     expect(writes[2]).toContain('ab')
   })
 })
+
+describe('bounded TSP framing and event reassembly', () => {
+  it('counts escape headers in the negotiated APC byte limit', async () => {
+    const { encodeTspMessage } = await import('./protocol.ts')
+    const wire = encodeTspMessage('f', '🌿'.repeat(200), 128)
+    const frames = wire.split('\\x1b\\').filter(Boolean).map((part) => part + '\\x1b\\')
+    expect(frames.length).toBeGreaterThan(1)
+    for (const packet of frames) expect(Buffer.byteLength(packet, 'utf8')).toBeLessThanOrEqual(128)
+    expect(() => encodeTspMessage('f', 'hi', 20)).toThrow(RangeError)
+  })
+
+  it('assembles UTF-8-safe incoming event chunks and rejects orphan chunks', async () => {
+    const { TspChunkAssembler, encodeTspMessage } = await import('./protocol.ts')
+    const assembler = new TspChunkAssembler()
+    const message = { ev: 'send', sf: TERN_SURFACE_ID, id: TERN_COMPOSER_ID, text: 'a🌿'.repeat(70) }
+    const wire = encodeTspMessage('e', JSON.stringify(message), 128)
+    const packets = wire.split('\\x1b\\').filter(Boolean).map((part) => part + '\\x1b\\')
+    let decoded: ReturnType<typeof decodeTspEvent> = null
+    for (const packet of packets) {
+      const complete = assembler.accept(packet.slice(2, -2))
+      if (complete != null) decoded = decodeTspEvent(complete)
+    }
+    expect(decoded).toEqual(message)
+    expect(assembler.accept('tsp;e;c=orphan;{"ev":"theme","dark":true}')).toBeNull()
+  })
+
+  it('rejects invalid ack sequence and out-of-range edit coordinates', () => {
+    expect(decodeTspEvent('tsp;e;{"ev":"ack","sf":"s","s":1.5}')).toBeNull()
+    expect(decodeTspEvent('tsp;e;{"ev":"edit","sf":"s","id":"c","from":-1,"to":2,"text":"x","cursor":0,"len":2}')).toBeNull()
+  })
+})

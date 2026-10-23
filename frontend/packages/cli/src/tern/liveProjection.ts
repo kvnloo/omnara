@@ -162,7 +162,7 @@ function userNode(message: OmnaraUIMessage): TernLiveNode | null {
   return {
     id,
     k: 'card',
-    p: { role: 'omp.user', tone: 'user' },
+    p: { role: 'omnara.user', tone: 'user' },
     c: [{ id: `${id}:text`, k: 'md', p: { text: `${text}${suffix}`.trim() } }],
   }
 }

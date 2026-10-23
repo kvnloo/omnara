@@ -21,7 +21,7 @@ export function applyTernComposerEdit(
   current: string,
   event: Extract<TspEvent, { ev: 'edit' }>,
 ): ComposerSnapshot | null {
-  if (event.len !== current.length) return null
+  if (event.len !== current.length || event.from > event.to || event.to > current.length) return null
   const from = clamp(event.from, current.length)
   const to = Math.max(from, clamp(event.to, current.length))
   const text = current.slice(0, from) + event.text + current.slice(to)
@@ -59,8 +59,14 @@ export class TernComposerTransport {
     private readonly write: (data: string) => void,
     hello: TspHello,
   ) {
-    this.credits = Math.max(1, Math.trunc(hello.credits ?? 2))
-    this.limit = Math.max(4, Math.trunc(hello.apc ?? 65_536))
+    if (
+      (hello.credits != null && (!Number.isSafeInteger(hello.credits) || hello.credits < 1)) ||
+      (hello.apc != null && (!Number.isSafeInteger(hello.apc) || hello.apc < 128))
+    ) {
+      throw new RangeError('Unsupported Tern frame credit or APC limit')
+    }
+    this.credits = hello.credits ?? 2
+    this.limit = hello.apc ?? 65_536
   }
 
   start(snapshot: ComposerSnapshot, sendable: boolean, main: readonly TernLiveNode[] = []): void {
