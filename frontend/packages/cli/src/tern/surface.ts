@@ -85,7 +85,6 @@ export function useTernComposerSurface({
     let resume: (() => Promise<void>) | undefined
     const hello = surface.hello
     const projectMain = liveProjectionEnabled && supportsTernLiveSurface(hello)
-    let submitting = false
     let lastSubmitted: string | undefined
 
     const teardown = (): void => {
@@ -155,12 +154,11 @@ export function useTernComposerSurface({
         }
 
         const submit = (text: string): void => {
-          if (cancelled || !owned || !sendableRef.current || submitting) return
+          if (cancelled || !owned || !sendableRef.current) return
           const trimmed = text.trim()
           if (trimmed === '' || lastSubmitted === text) return
-          // The event carries a complete external prompt; it need not match the
-          // current editor draft. Deduplicate until an actual subsequent edit.
-          submitting = true
+          // Atomic event text is independent of the editor draft. Reject repeat
+          // delivery of the same prompt, not a distinct prompt still marked sendable.
           lastSubmitted = text
           nativeTextRef.current = ''
           cursorRef.current = 0
@@ -172,9 +170,7 @@ export function useTernComposerSurface({
             return
           }
 
-          void callbacksRef.current.onSend(trimmed).catch(() => undefined).finally(() => {
-            submitting = false
-          })
+          void callbacksRef.current.onSend(trimmed).catch(() => undefined)
         }
 
         unsubscribe = terminal.subscribeEvents((event) => {
