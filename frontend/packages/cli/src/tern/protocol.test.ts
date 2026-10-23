@@ -86,7 +86,9 @@ describe('composer parity', () => {
   })
   it('coalesces while frame credit is in flight', () => {
     const writes: string[] = []
-    const t = new TernComposerTransport((x) => writes.push(x), {
+    const t = new TernComposerTransport((x) => {
+      writes.push(x)
+    }, {
       r: 'hello',
       v: 1,
       term: 'tern',
@@ -162,7 +164,9 @@ describe('native transport invalid capability and credit guards', () => {
 describe('native ACK ownership', () => {
   it('never treats a future ACK as permission to send another frame', () => {
     const writes: string[] = []
-    const transport = new TernComposerTransport((data) => writes.push(data), {
+    const transport = new TernComposerTransport((data) => {
+      writes.push(data)
+    }, {
       r: 'hello', v: 1, term: 'tern', kinds: ['col', 'editor'], credits: 1,
     })
     transport.start({ text: '', cursor: 0 }, true)
