@@ -65,7 +65,9 @@ function mount(mode: Mode, onSend: (text: string) => Promise<void>) {
     rows: 35,
   })
   const writes: string[] = []
-  stdout.on('data', (chunk: Buffer) => writes.push(chunk.toString()))
+  stdout.on('data', (chunk: Buffer) => {
+    writes.push(chunk.toString())
+  })
   const terminal = new TernTerminal(source, stdout)
   const props: Props = { ...mode, terminal, onSend }
   const app = render(<Harness {...props} />, {
@@ -141,7 +143,9 @@ describe('mounted Ink/Tern composer lifecycle', () => {
         expect(fixture.writes.join('')).toContain('\x1b[?2004l')
       })
       const inkInput: string[] = []
-      fixture.terminal.stdin.on('data', (chunk: Buffer) => inkInput.push(chunk.toString()))
+      fixture.terminal.stdin.on('data', (chunk: Buffer) => {
+        inkInput.push(chunk.toString())
+      })
       fixture.source.write('z')
       expect(inkInput.join('')).toContain('z')
       fixture.rerender({ enabled: false, idle: true, liveProjectionEnabled: false })
