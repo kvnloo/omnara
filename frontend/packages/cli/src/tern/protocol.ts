@@ -146,7 +146,8 @@ export function encodeTspMessage(
   if (
     Buffer.byteLength(body, 'utf8') <= limit &&
     Buffer.byteLength(single, 'utf8') <= TSP_MAX_WIRE_BYTES
-  ) return single
+  )
+    return single
 
   const id = (nextChunkId++).toString(36)
   const continuation = ';c=' + id + ';m=1'

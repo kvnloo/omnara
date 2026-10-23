@@ -68,9 +68,7 @@ export function useTernComposerSurface({
   }, [enabled, surface.status, terminal])
 
   const liveCapable =
-    liveProjectionEnabled &&
-    surface.status === 'active' &&
-    supportsTernLiveSurface(surface.hello)
+    liveProjectionEnabled && surface.status === 'active' && supportsTernLiveSurface(surface.hello)
   const canOwnSurface = sendable && (idle || liveCapable)
 
   useEffect(() => {
@@ -173,8 +171,7 @@ export function useTernComposerSurface({
           projectMain ? mainRef.current : [],
         )
 
-        const currentMain = (): readonly TernLiveNode[] =>
-          projectMain ? mainRef.current : []
+        const currentMain = (): readonly TernLiveNode[] => (projectMain ? mainRef.current : [])
 
         const applyDraft = (next: { cursor: number; text: string }): void => {
           if (next.text !== nativeTextRef.current) lastAtomicSend = undefined
@@ -275,9 +272,7 @@ export function useTernComposerSurface({
     // The native model is updated synchronously before notifying React; it is
     // adopted from the canonical prop again on each new ownership lifecycle.
     const projectMain =
-      liveProjectionEnabled &&
-      surface.status === 'active' &&
-      supportsTernLiveSurface(surface.hello)
+      liveProjectionEnabled && surface.status === 'active' && supportsTernLiveSurface(surface.hello)
     transport.update(
       { cursor: cursorRef.current, text: nativeTextRef.current },
       sendable,

@@ -26,9 +26,7 @@ function retainedPrefixLength(value: string, marker: string): number {
 
 /** Input parts must be dispatched in wire order, across split APC markers. */
 export type TspInputPart =
-  | { kind: 'input'; data: string }
-  | { kind: 'tsp'; payload: string }
-  | { kind: 'invalid' }
+  { kind: 'input'; data: string } | { kind: 'tsp'; payload: string } | { kind: 'invalid' }
 
 export interface TspInputChunk {
   input: string

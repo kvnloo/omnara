@@ -50,7 +50,7 @@ function mount(onSend: (text: string) => void) {
   const terminal = new TernTerminal(source, output)
   const app = render(<FallbackComposer onSend={onSend} renderCount={0} />, {
     stdin: terminal.inkStdin(),
-    stdout: output as NodeJS.WriteStream,
+    stdout: output,
     patchConsole: false,
     exitOnCtrlC: false,
   })

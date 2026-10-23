@@ -55,18 +55,12 @@ function Harness({ terminal, onSend, onQuit = () => undefined, main = [], ...mod
 }
 
 const hello = (kinds: string[] = ['col', 'editor']) =>
-  '\x1b_tsp;r;' +
-  JSON.stringify({ r: 'hello', v: 1, term: 'tern', kinds, credits: 2 }) +
-  '\x1b\\'
+  '\x1b_tsp;r;' + JSON.stringify({ r: 'hello', v: 1, term: 'tern', kinds, credits: 2 }) + '\x1b\\'
 const event = (data: TspJson) => '\x1b_tsp;e;' + JSON.stringify(data) + '\x1b\\'
 const send = (text: string) =>
   event({ ev: 'send', sf: 'omnara:session', id: 'omnara:composer', text })
 
-function mount(
-  mode: Mode,
-  onSend: (text: string) => Promise<void>,
-  onQuit?: () => void,
-) {
+function mount(mode: Mode, onSend: (text: string) => Promise<void>, onQuit?: () => void) {
   const source = new FakeTty()
   const stdout = Object.assign(new PassThrough(), {
     isTTY: true,
@@ -116,13 +110,10 @@ async function activate(fixture: ReturnType<typeof mount>, kinds?: string[]) {
 describe('mounted Ink/Tern composer lifecycle', () => {
   it('accepts an atomic Unicode multiline send from an empty draft once', async () => {
     const sends: string[] = []
-    const fixture = mount(
-      { enabled: true, idle: true, liveProjectionEnabled: false },
-      (text) => {
-        sends.push(text)
-        return Promise.resolve()
-      },
-    )
+    const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, (text) => {
+      sends.push(text)
+      return Promise.resolve()
+    })
     try {
       await activate(fixture)
       fixture.source.write(send('hello 🌿\n世界'))
@@ -144,15 +135,12 @@ describe('mounted Ink/Tern composer lifecycle', () => {
   it('does not drop a distinct atomic send while the previous send promise is pending', async () => {
     const sends: string[] = []
     const complete: (() => void)[] = []
-    const fixture = mount(
-      { enabled: true, idle: true, liveProjectionEnabled: false },
-      (text) => {
-        sends.push(text)
-        return new Promise<void>((resolve) => {
-          complete.push(resolve)
-        })
-      },
-    )
+    const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, (text) => {
+      sends.push(text)
+      return new Promise<void>((resolve) => {
+        complete.push(resolve)
+      })
+    })
     try {
       await activate(fixture)
       fixture.source.write(send('first 🌿'))
@@ -208,13 +196,10 @@ describe('mounted Ink/Tern composer lifecycle', () => {
 
   it('preserves fragmented UTF-8 bytes and a bracketed multiline paste', async () => {
     const sent: string[] = []
-    const fixture = mount(
-      { enabled: true, idle: true, liveProjectionEnabled: false },
-      (text) => {
-        sent.push(text)
-        return Promise.resolve()
-      },
-    )
+    const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, (text) => {
+      sent.push(text)
+      return Promise.resolve()
+    })
     try {
       await activate(fixture)
       const utf8 = Buffer.from('hè 🌍 第二行', 'utf8')
@@ -246,9 +231,7 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       await activate(fixture)
       fixture.source.write('/a' + event({ ev: 'ack', sf: 'omnara:session', s: 1 }))
       fixture.rerender(mode)
-      fixture.source.write(
-        event({ ev: 'resize', sf: 'omnara:session', cols: 100, visible: true }),
-      )
+      fixture.source.write(event({ ev: 'resize', sf: 'omnara:session', cols: 100, visible: true }))
       fixture.source.write('s' + event({ ev: 'theme', dark: false }))
       fixture.rerender(mode)
       fixture.source.write(
@@ -264,13 +247,10 @@ describe('mounted Ink/Tern composer lifecycle', () => {
 
   it('submits a native atomic prefix instead of the longer PTY draft', async () => {
     const sent: string[] = []
-    const fixture = mount(
-      { enabled: true, idle: true, liveProjectionEnabled: false },
-      (text) => {
-        sent.push(text)
-        return Promise.resolve()
-      },
-    )
+    const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, (text) => {
+      sent.push(text)
+      return Promise.resolve()
+    })
     try {
       await activate(fixture)
       fixture.source.write('foobar')
@@ -287,13 +267,10 @@ describe('mounted Ink/Tern composer lifecycle', () => {
 
   it('submits a native atomic superstring instead of the shorter PTY draft', async () => {
     const sent: string[] = []
-    const fixture = mount(
-      { enabled: true, idle: true, liveProjectionEnabled: false },
-      (text) => {
-        sent.push(text)
-        return Promise.resolve()
-      },
-    )
+    const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, (text) => {
+      sent.push(text)
+      return Promise.resolve()
+    })
     try {
       await activate(fixture)
       fixture.source.write('foo')
@@ -308,13 +285,10 @@ describe('mounted Ink/Tern composer lifecycle', () => {
 
   it('submits unrelated atomic text exactly, even with another nonempty PTY draft', async () => {
     const sent: string[] = []
-    const fixture = mount(
-      { enabled: true, idle: true, liveProjectionEnabled: false },
-      (text) => {
-        sent.push(text)
-        return Promise.resolve()
-      },
-    )
+    const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, (text) => {
+      sent.push(text)
+      return Promise.resolve()
+    })
     try {
       await activate(fixture)
       fixture.source.write('local draft')
@@ -329,13 +303,10 @@ describe('mounted Ink/Tern composer lifecycle', () => {
 
   it('treats an empty atomic send as a no-op without submitting its local PTY draft', async () => {
     const sent: string[] = []
-    const fixture = mount(
-      { enabled: true, idle: true, liveProjectionEnabled: false },
-      (text) => {
-        sent.push(text)
-        return Promise.resolve()
-      },
-    )
+    const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, (text) => {
+      sent.push(text)
+      return Promise.resolve()
+    })
     try {
       await activate(fixture)
       fixture.source.write('unsent locally')
@@ -381,13 +352,10 @@ describe('mounted Ink/Tern composer lifecycle', () => {
 
   it('does not conflate PTY Enter with an identical independent atomic send', async () => {
     const sent: string[] = []
-    const fixture = mount(
-      { enabled: true, idle: true, liveProjectionEnabled: false },
-      (text) => {
-        sent.push(text)
-        return Promise.resolve()
-      },
-    )
+    const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, (text) => {
+      sent.push(text)
+      return Promise.resolve()
+    })
     try {
       await activate(fixture)
       fixture.source.write('same\r')
@@ -480,8 +448,9 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       fixture.rerender({ enabled: false, idle: true, liveProjectionEnabled: false })
       fixture.rerender({ enabled: true, idle: true, liveProjectionEnabled: false })
       await vi.waitFor(() => {
-        expect(fixture.writes.filter((part) => part.includes('\x1b[?2004h')).length)
-          .toBeGreaterThan(1)
+        expect(
+          fixture.writes.filter((part) => part.includes('\x1b[?2004h')).length,
+        ).toBeGreaterThan(1)
       })
     } finally {
       fixture.dispose()
@@ -490,9 +459,7 @@ describe('mounted Ink/Tern composer lifecycle', () => {
 
   it('projects explicit live nodes while busy only with opted-in capabilities', async () => {
     const onSend = vi.fn((_text: string) => Promise.resolve())
-    const fixture = mount(
-      { enabled: true, idle: false, liveProjectionEnabled: true }, onSend,
-    )
+    const fixture = mount({ enabled: true, idle: false, liveProjectionEnabled: true }, onSend)
     try {
       const richKinds = ['col', 'editor', 'md', 'card', 'text', 'tool', 'code']
       await activate(fixture, richKinds)

@@ -191,8 +191,14 @@ describe('mixed APC and pty key ordering', () => {
     terminal.beginNativeOwnership()
 
     const edit = {
-      ev: 'edit', sf: 'omnara:session', id: 'omnara:composer',
-      from: 0, to: 1, text: 'b', cursor: 1, len: 1,
+      ev: 'edit',
+      sf: 'omnara:session',
+      id: 'omnara:composer',
+      from: 0,
+      to: 1,
+      text: 'b',
+      cursor: 1,
+      len: 1,
     }
     source.write('a' + eventApc(edit))
     expect(draft).toBe('b')
@@ -215,8 +221,14 @@ describe('mixed APC and pty key ordering', () => {
     })
     terminal.beginNativeOwnership()
     const edit = eventApc({
-      ev: 'edit', sf: 'omnara:session', id: 'omnara:composer',
-      from: 0, to: 0, text: 'b', cursor: 1, len: 0,
+      ev: 'edit',
+      sf: 'omnara:session',
+      id: 'omnara:composer',
+      from: 0,
+      to: 0,
+      text: 'b',
+      cursor: 1,
+      len: 0,
     })
     source.write(edit.slice(0, 5))
     source.write(edit.slice(5) + 'a\x1b_ts')

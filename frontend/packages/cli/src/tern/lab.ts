@@ -139,7 +139,9 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
         res,
         200,
         JSON.stringify({
-          data: page.slice(-100).map((event) => schemas.zAgentEvent.parse(JSON.parse(event.payload))),
+          data: page
+            .slice(-100)
+            .map((event) => schemas.zAgentEvent.parse(JSON.parse(event.payload))),
           next_after_sequence: sequence,
           next_before_sequence: null,
           has_more: false,
@@ -304,7 +306,11 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
           tool_call_id: interaction.tool_call_id,
           agent_id: scope.agentID,
           state: 'completed',
-          interaction_update: { id: interaction.id, interaction_kind: 'question', state: 'resolved' },
+          interaction_update: {
+            id: interaction.id,
+            interaction_kind: 'question',
+            state: 'resolved',
+          },
         }),
       )
       completeTurn(turn, 'interaction resolved')
@@ -345,9 +351,7 @@ async function main(): Promise<void> {
   if (!isTcpAddress(address)) throw new Error('Fixture port unavailable')
   const baseUrl = `http://127.0.0.1:${address.port}/v1`
   process.stderr.write(
-    'Omnara/Tern loopback fixture at ' +
-      baseUrl +
-      ' (local only; no credentials or model calls)\n',
+    'Omnara/Tern loopback fixture at ' + baseUrl + ' (local only; no credentials or model calls)\n',
   )
   process.stderr.write(
     'Send text, emoji or multiline. Send /ask for an Ink-owned interaction. ' +
@@ -372,10 +376,14 @@ async function main(): Promise<void> {
         interactionsResolved !== 1
       ) {
         throw new Error(
-          'Native /ask proof failed: exact=' + String(exact) +
-            ', truncated=' + String(truncated) +
-            ', opened=' + String(interactionsOpened) +
-            ', resolved=' + String(interactionsResolved),
+          'Native /ask proof failed: exact=' +
+            String(exact) +
+            ', truncated=' +
+            String(truncated) +
+            ', opened=' +
+            String(interactionsOpened) +
+            ', resolved=' +
+            String(interactionsResolved),
         )
       }
       process.stderr.write(
@@ -391,9 +399,12 @@ async function main(): Promise<void> {
         interactionsResolved !== 1
       ) {
         throw new Error(
-          'Native PTY proof failed: posts=' + JSON.stringify(sdkPosts) +
-            ', opened=' + String(interactionsOpened) +
-            ', resolved=' + String(interactionsResolved),
+          'Native PTY proof failed: posts=' +
+            JSON.stringify(sdkPosts) +
+            ', opened=' +
+            String(interactionsOpened) +
+            ', resolved=' +
+            String(interactionsResolved),
         )
       }
       process.stderr.write('Native PTY proof: exact SDK inputs and interaction; TTY cooked.\n')

@@ -9,10 +9,7 @@
 import type { ComposerSnapshot } from './composer.ts'
 
 export type TernComposerKey =
-  | { kind: 'text'; text: string }
-  | { kind: 'backspace' }
-  | { kind: 'submit' }
-  | { kind: 'quit' }
+  { kind: 'text'; text: string } | { kind: 'backspace' } | { kind: 'submit' } | { kind: 'quit' }
 
 const ESC = '\x1b'
 const PASTE_START = '\x1b[200~'

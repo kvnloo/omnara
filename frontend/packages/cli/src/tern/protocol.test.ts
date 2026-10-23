@@ -86,15 +86,18 @@ describe('composer parity', () => {
   })
   it('coalesces while frame credit is in flight', () => {
     const writes: string[] = []
-    const t = new TernComposerTransport((x) => {
-      writes.push(x)
-    }, {
-      r: 'hello',
-      v: 1,
-      term: 'tern',
-      kinds: ['col', 'editor'],
-      credits: 1,
-    })
+    const t = new TernComposerTransport(
+      (x) => {
+        writes.push(x)
+      },
+      {
+        r: 'hello',
+        v: 1,
+        term: 'tern',
+        kinds: ['col', 'editor'],
+        credits: 1,
+      },
+    )
     t.start({ cursor: 0, text: '' }, true)
     t.update({ cursor: 1, text: 'a' }, true)
     t.update({ cursor: 2, text: 'ab' }, true)
@@ -109,7 +112,10 @@ describe('bounded TSP framing and event reassembly', () => {
   it('bounds the negotiated JSON body bytes, not the envelope', () => {
     const wire = encodeTspMessage('f', '🌿'.repeat(200), 128)
     const st = String.fromCharCode(27, 92)
-    const frames = wire.split(st).filter(Boolean).map((part) => part + st)
+    const frames = wire
+      .split(st)
+      .filter(Boolean)
+      .map((part) => part + st)
     expect(frames.length).toBeGreaterThan(1)
     for (const packet of frames) {
       const payload = packet.slice(2, -2)
@@ -131,7 +137,10 @@ describe('bounded TSP framing and event reassembly', () => {
     }
     const wire = encodeTspMessage('e', JSON.stringify(message), 128)
     const st = String.fromCharCode(27, 92)
-    const packets = wire.split(st).filter(Boolean).map((part) => part + st)
+    const packets = wire
+      .split(st)
+      .filter(Boolean)
+      .map((part) => part + st)
     let decoded: ReturnType<typeof decodeTspEvent> = null
     for (const packet of packets) {
       const complete = assembler.accept(packet.slice(2, -2))
@@ -144,7 +153,9 @@ describe('bounded TSP framing and event reassembly', () => {
   it('rejects invalid ack sequence and out-of-range edit coordinates', () => {
     expect(decodeTspEvent('tsp;e;{"ev":"ack","sf":"s","s":1.5}')).toBeNull()
     expect(
-      decodeTspEvent('tsp;e;{"ev":"edit","sf":"s","id":"c","from":-1,"to":2,"text":"x","cursor":0,"len":2}'),
+      decodeTspEvent(
+        'tsp;e;{"ev":"edit","sf":"s","id":"c","from":-1,"to":2,"text":"x","cursor":0,"len":2}',
+      ),
     ).toBeNull()
   })
 })
@@ -175,8 +186,14 @@ describe('native transport invalid capability and credit guards', () => {
 
   it('rejects a malformed same-length edit rather than clamping its range', () => {
     const event = {
-      ev: 'edit', sf: TERN_SURFACE_ID, id: TERN_COMPOSER_ID,
-      from: 3, to: 1, len: 4, cursor: 2, text: 'x',
+      ev: 'edit',
+      sf: TERN_SURFACE_ID,
+      id: TERN_COMPOSER_ID,
+      from: 3,
+      to: 1,
+      len: 4,
+      cursor: 2,
+      text: 'x',
     } as const
     expect(applyTernComposerEdit('abcd', event)).toBeNull()
   })
@@ -185,11 +202,18 @@ describe('native transport invalid capability and credit guards', () => {
 describe('native ACK ownership', () => {
   it('never treats a future ACK as permission to send another frame', () => {
     const writes: string[] = []
-    const transport = new TernComposerTransport((data) => {
-      writes.push(data)
-    }, {
-      r: 'hello', v: 1, term: 'tern', kinds: ['col', 'editor'], credits: 1,
-    })
+    const transport = new TernComposerTransport(
+      (data) => {
+        writes.push(data)
+      },
+      {
+        r: 'hello',
+        v: 1,
+        term: 'tern',
+        kinds: ['col', 'editor'],
+        credits: 1,
+      },
+    )
     transport.start({ text: '', cursor: 0 }, true)
     transport.update({ text: 'later', cursor: 5 }, true)
     transport.handleEvent({ ev: 'ack', sf: TERN_SURFACE_ID, s: 900 })
@@ -234,7 +258,10 @@ describe('continuation boundaries under the full Tern wire grammar', () => {
     }
     const body = JSON.stringify(input)
     const wire = encodeTspMessage('f', body, 128)
-    const packets = wire.split('\x1b\\').filter(Boolean).map((part) => part.slice(2))
+    const packets = wire
+      .split('\x1b\\')
+      .filter(Boolean)
+      .map((part) => part.slice(2))
     expect(packets.length).toBeGreaterThan(2)
     let joined = ''
     for (const packet of packets) {
