@@ -19,10 +19,10 @@ import * as z from 'zod'
 import { summaryWidth, toolCallSummary } from './agent-rendering.ts'
 import { InteractionPrompt, Label, TextInput } from './chat-prompts.tsx'
 import { supportsTernAgentSurface } from './tern/composer.ts'
+import type { TernPresentationMode } from './tern/config.ts'
 import { projectTernSession } from './tern/liveProjection.ts'
 import { projectTernSubagents } from './tern/subagentProjection.ts'
 import { useTernComposerSurface } from './tern/surface.ts'
-import type { TernPresentationMode } from './tern/config.ts'
 import type { TernTerminal } from './tern/terminal.ts'
 
 type MessagePart = OmnaraUIMessage['parts'][number]
