@@ -407,6 +407,70 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     }
   })
 
+  it('does not clear the editor on quit and waits for the last ACK', async () => {
+    const onQuit = vi.fn()
+    const fixture = mount(
+      { enabled: true, idle: true, liveProjectionEnabled: false },
+      vi.fn(() => Promise.resolve()),
+      onQuit,
+    )
+    try {
+      await activate(fixture)
+      const ink: string[] = []
+      fixture.terminal.stdin.on('data', (data: Buffer) => ink.push(data.toString()))
+      fixture.source.write('/quit\r')
+      const frames = fixture.writes
+        .join('')
+        .split('\x1b\\')
+        .map((packet) => packet.slice(packet.lastIndexOf('\x1b_tsp;f;')))
+        .filter((packet) => packet.startsWith('\x1b_tsp;f;'))
+        .map((packet) => JSON.parse(packet.slice('\x1b_tsp;f;'.length)) as {
+          s: number
+          ops: unknown[][]
+        })
+      expect(frames.length).toBeGreaterThan(1)
+      expect(
+        frames.some((frame) =>
+          frame.ops.some(
+            (op) =>
+              op[0] === 'set' &&
+              op[1] === 'omnara:composer' &&
+              (op[2] as { text?: string }).text === '',
+          ),
+        ),
+      ).toBe(false)
+      expect(fixture.writes.join('')).not.toContain('\x1b_tsp;x;')
+      expect(onQuit).not.toHaveBeenCalled()
+      expect(fixture.source.isRaw).toBe(true)
+      fixture.source.write('following-input')
+      expect(ink.join('')).toContain('following-input')
+      fixture.source.write(event({ ev: 'ack', sf: 'omnara:session', s: 999 }))
+      expect(onQuit).not.toHaveBeenCalled()
+      const lastSeq = Math.max(...frames.map((frame) => frame.s))
+      fixture.source.write(event({ ev: 'ack', sf: 'omnara:session', s: lastSeq }))
+      await vi.waitFor(() => expect(onQuit).toHaveBeenCalledTimes(1))
+      expect(fixture.writes.join('')).toContain('\x1b_tsp;x;')
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('bounds a missing native close ACK without hanging on /quit', async () => {
+    const onQuit = vi.fn()
+    const fixture = mount(
+      { enabled: true, idle: true, liveProjectionEnabled: false },
+      vi.fn(() => Promise.resolve()),
+      onQuit,
+    )
+    try {
+      await activate(fixture)
+      fixture.source.write('/quit\r')
+      await vi.waitFor(() => expect(onQuit).toHaveBeenCalledTimes(1), { timeout: 1_500 })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
   it('restores the terminal and exits once after /quit from real PTY bytes', async () => {
     const onQuit = vi.fn()
     const onSend = vi.fn((_text: string) => Promise.resolve())

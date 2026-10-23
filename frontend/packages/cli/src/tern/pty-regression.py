@@ -2,8 +2,8 @@
 """Run the real Omnara CLI/SDK loopback lab through an owned kernel PTY.
 
 The small TSP peer here supplies hello/ACK only; this is NOT a real Tern host
-or a substitute for the lead's native Tern acceptance run. No shell or
-credentials are used.
+or a substitute for the lead's native Tern acceptance run. Only an
+owned shell-like sentinel is used; no user shell or credentials are accessed.
 """
 import errno
 import fcntl
@@ -13,14 +13,19 @@ import pty
 import select
 import signal
 import struct
+import subprocess
 import sys
 import termios
 import time
 
 OPEN = b"\x1b_tsp;o;"
 FRAME = b"\x1b_tsp;f;"
+CLOSE = b"\x1b_tsp;x;"
 ST = b"\x1b\\"
 TRACE = b"Omnara lab SDK POST text: "
+APP_EXIT = b"__OMNARA_APP_EXIT__:"
+SHELL_READY = b"__OMNARA_NEXT_SHELL_READY__"
+SHELL_INPUT = b"__OMNARA_NEXT_SHELL_INPUT__:"
 HELLO = {
     "r": "hello",
     "v": 1,
@@ -32,27 +37,43 @@ HELLO = {
 
 
 class OwnedPty:
-    def __init__(self, node, tsx, lab):
+    def __init__(self, node, tsx, lab, *, assert_pty=True):
         self.pid, self.master = pty.fork()
         if self.pid == 0:
-            # pty.fork gives the child a controlling OS tty on all 3 stdio fds.
-            # In particular, process.stdin.setRawMode is the real tty method.
+            # The app and a following owned shell sentinel share the SAME tty.
+            # A direct-exec PTY closes its slave on app exit and cannot detect
+            # delayed APC bytes being accepted as the next shell's command.
             try:
-                # Ink 8 suppresses interactive frames and suspend/resume when CI=1.
-                # This child owns a genuine controlling PTY, so use tty rendering.
-                os.execve(node, [node, tsx, lab, "--trace-sdk", "--assert-pty"], {
+                # Ink 8 suppresses interactive frames and suspend/resume in CI.
+                env = {
                     "PATH": os.environ.get("PATH", ""),
                     "TERM": "xterm-256color",
                     "NO_COLOR": "1",
                     "OMNARA_TERN_NATIVE": "1",
                     "OMNARA_TERN_LIVE": "0",
-                })
+                }
+                args = [node, tsx, lab, "--trace-sdk"]
+                if assert_pty:
+                    args.append("--assert-pty")
+                app = subprocess.run(args, env=env, check=False)
+                os.write(1, ("\n" + APP_EXIT.decode() + str(app.returncode) + "\n").encode())
+                os.write(1, SHELL_READY + b" $ ")
+                line = sys.stdin.buffer.readline()
+                os.write(
+                    1,
+                    b"\r\n" + SHELL_INPUT
+                    + json.dumps(line.decode("utf-8", errors="backslashreplace")).encode()
+                    + b"\n",
+                )
+                os._exit(app.returncode if app.returncode >= 0 else 1)
             except BaseException as exc:
-                os.write(2, ("exec failed: " + repr(exc) + "\n").encode())
+                os.write(2, ("owned PTY wrapper failed: " + repr(exc) + "\n").encode())
                 os._exit(127)
         fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 100, 0, 0))
         self.output = bytearray()
         self.frame_cursor = 0
+        self.hold_acks = False
+        self.held_acks = []
         self.reaped = False
 
     def write(self, data):
@@ -99,7 +120,32 @@ class OwnedPty:
             except (ValueError, UnicodeDecodeError):
                 continue  # A chunked frame is not usable as a complete frame.
             if isinstance(frame, dict) and isinstance(frame.get("s"), int):
-                self.tsp_event({"ev": "ack", "sf": frame["sf"], "s": frame["s"]})
+                # Store only authentic frame sequences observed on this PTY.
+                ack = {"ev": "ack", "sf": frame["sf"], "s": frame["s"]}
+                if self.hold_acks:
+                    self.held_acks.append(ack)
+                else:
+                    self.tsp_event(ack)
+
+    def release_held_acks(self):
+        for ack in self.held_acks:
+            self.tsp_event(ack)
+        self.held_acks.clear()
+
+    def assert_next_shell_clean(self):
+        # The wrapper deliberately stays attached AFTER the Node app exits.
+        # Cooked-line input here reproduces a real subsequent shell prompt.
+        self.until(SHELL_READY, timeout=5)
+        self.write(b"owned-shell-sentinel\r")
+        self.until(SHELL_INPUT, timeout=5)
+        start = self.output.rfind(SHELL_INPUT) + len(SHELL_INPUT)
+        self.until(b"\n", after=start, timeout=5)
+        end = self.output.find(b"\n", start)
+        if end < 0:
+            raise AssertionError("next-shell sentinel result is incomplete")
+        received = json.loads(bytes(self.output[start:end]).strip().decode())
+        if received != "owned-shell-sentinel\n":
+            raise AssertionError("TSP bytes contaminated next shell input: " + repr(received))
 
     def until(self, marker, *, after=0, timeout=25):
         deadline = time.monotonic() + timeout
@@ -136,7 +182,9 @@ class OwnedPty:
     def close(self):
         if not self.reaped:
             try:
-                os.kill(self.pid, signal.SIGTERM)
+                # pty.fork creates a private session; also stop the app child
+                # if the owned Python shell wrapper has not finished.
+                os.killpg(self.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
             os.waitpid(self.pid, 0)
@@ -198,15 +246,30 @@ def run(node, tsx, lab):
         session.until(b"Omnara lab interaction resolved", after=start)
         session.until_count(OPEN, opens + 1)
 
-        # The true runChat shutdown checks cooked mode; the fixture also
-        # asserts the complete SDK text sequence, count and interaction.
+        # Withhold the ACK of an actual emitted editor frame as /quit starts.
+        # The correct lifecycle waits for that ACK BEFORE surface close and
+        # before returning the terminal to the following owned shell prompt.
         start = len(session.output)
-        session.write(b"/quit\r")
+        frames = session.output.count(FRAME)
+        session.hold_acks = True
+        session.write(b"/")
+        session.until_count(FRAME, frames + 1, timeout=5)
+        session.write(b"quit\r")
+        if not session.held_acks:
+            raise AssertionError("quit did not leave a real in-flight frame to ACK")
+        deadline = time.monotonic() + 0.15
+        while time.monotonic() < deadline:
+            session.pump(min(0.02, deadline - time.monotonic()))
+            if CLOSE in session.output[start:] or APP_EXIT in session.output[start:]:
+                raise AssertionError("app closed or exited before its real frame ACK")
+        session.release_held_acks()
+        session.until(CLOSE, after=start, timeout=5)
         session.until(b"Native PTY proof:", after=start)
+        session.assert_next_shell_clean()
         code = session.wait_exit()
         if code:
             raise AssertionError("real runChat fixture exited with " + str(code))
-        print("Real OS PTY native input proof passed (not a real Tern host).")
+        print("Real OS PTY native input and clean next-shell proof passed (not a real Tern host).")
     except BaseException:
         sys.stderr.write(
             "Owned PTY transcript tail (diagnostic only):\n"
@@ -217,7 +280,44 @@ def run(node, tsx, lab):
         session.close()
 
 
+def run_no_ack(node, tsx, lab):
+    session = OwnedPty(node, tsx, lab, assert_pty=False)
+    try:
+        session.until(b"\x1b_tsp;q;", timeout=20)
+        session.write(b"\x1b_tsp;r;" + json.dumps(HELLO, separators=(",", ":")).encode() + ST)
+        session.until_count(OPEN, 1, timeout=20)
+        session.hold_acks = True
+        start = time.monotonic()
+        frames = session.output.count(FRAME)
+        session.write(b"/")
+        session.until_count(FRAME, frames + 1, timeout=5)
+        session.write(b"quit\r")
+        session.until(CLOSE, timeout=5)
+        if not session.held_acks:
+            raise AssertionError("missing authentic frame for no-ACK deadline")
+        # Do not synthesize any ACK. The app must time out its protocol wait,
+        # restore the real tty, and leave the following shell input untouched.
+        session.assert_next_shell_clean()
+        elapsed = time.monotonic() - start
+        if elapsed > 3:
+            raise AssertionError("native close did not finish within bounded deadline")
+        code = session.wait_exit(timeout=5)
+        if code:
+            raise AssertionError("no-ACK fixture exited with " + str(code))
+        print("Real OS PTY missing-ACK deadline and clean next-shell proof passed.")
+    except BaseException:
+        sys.stderr.write(
+            "Owned PTY no-ACK transcript tail:\n" + repr(bytes(session.output[-5000:])) + "\n"
+        )
+        raise
+    finally:
+        session.close()
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        raise SystemExit("usage: pty-regression.py NODE TSX_CLI LAB_TS")
-    run(*sys.argv[1:])
+    if len(sys.argv) not in (4, 5) or (len(sys.argv) == 5 and sys.argv[4] != "--no-ack"):
+        raise SystemExit("usage: pty-regression.py NODE TSX_CLI LAB_TS [--no-ack]")
+    if len(sys.argv) == 5:
+        run_no_ack(*sys.argv[1:4])
+    else:
+        run(*sys.argv[1:4])

@@ -13,6 +13,10 @@ import { applyTernComposerKey, TernComposerKeyDecoder } from './keys.ts'
 import type { TernLiveNode } from './liveProjection.ts'
 import type { TernTerminal } from './terminal.ts'
 
+// The last in-flight native frame must settle before process exit releases
+// the mux to a shell. This is a deadline, not a blind exit delay.
+const EXIT_ACK_DRAIN_MS = 450
+
 export function useTernComposerSurface({
   terminal,
   enabled,
@@ -100,6 +104,7 @@ export function useTernComposerSurface({
       const transport = ownedTransport
       ownedTransport = undefined
       if (transportRef.current === transport) transportRef.current = null
+      transport?.cancelAckWait()
       let failed = false
       try {
         transport?.stop()
@@ -127,22 +132,34 @@ export function useTernComposerSurface({
     const quit = (): void => {
       if (lifecycle.cancelled || quitting) return
       quitting = true
-      // Release native input and paste mode before resuming Ink to exit. Ink
-      // may reacquire raw mode during resume; runChat.dispose() cooks it again.
-      const restore = resume
-      resume = undefined
-      teardown()
-      if (restore == null) {
-        callbacksRef.current.onQuit()
-        return
+      // No editor-clear frame on /quit. Quiesce pending projections, wait for
+      // authentic frame ACKs, *then* send surface close and release the raw tty.
+      // Tern's delayed frame replies must not become next-shell input.
+      const transport = ownedTransport
+      if (transportRef.current === transport) transportRef.current = null
+      let drain: Promise<boolean> | undefined
+      try {
+        transport?.beginClose()
+        terminal.handoffNativeKeysToInk()
+        drain = transport?.waitForOutstandingAcks(EXIT_ACK_DRAIN_MS)
+      } catch {
+        terminal.disableNativeSurface()
       }
-      void restore()
-        .catch(() => {
-          terminal.disableNativeSurface()
-        })
-        .then(() => {
-          callbacksRef.current.onQuit()
-        })
+      void (async () => {
+        if (drain != null) await drain
+        if (lifecycle.cancelled) return
+        const restore = resume
+        resume = undefined
+        teardown()
+        if (restore != null) {
+          try {
+            await restore()
+          } catch {
+            terminal.disableNativeSurface()
+          }
+        }
+        if (!lifecycle.cancelled) callbacksRef.current.onQuit()
+      })()
     }
 
     void (async () => {
@@ -174,6 +191,7 @@ export function useTernComposerSurface({
         const currentMain = (): readonly TernLiveNode[] => (projectMain ? mainRef.current : [])
 
         const applyDraft = (next: { cursor: number; text: string }): void => {
+          if (lifecycle.cancelled || quitting) return
           if (next.text !== nativeTextRef.current) lastAtomicSend = undefined
           nativeTextRef.current = next.text
           cursorRef.current = next.cursor
@@ -187,6 +205,10 @@ export function useTernComposerSurface({
           if (lifecycle.cancelled || quitting || !owned || !sendableRef.current) return
           const trimmed = text.trim()
           if (trimmed === '' || (!fromPty && lastAtomicSend === text)) return
+          if (trimmed === '/quit' || trimmed === '/exit') {
+            quit()
+            return
+          }
           // A repeated atomic event is suppressible until the next edit, but
           // an ordinary PTY Enter is a separate action even for equal text.
           lastAtomicSend = fromPty ? undefined : text
@@ -196,11 +218,6 @@ export function useTernComposerSurface({
           pendingDraftRef.current = ''
           callbacksRef.current.onDraftChange('')
           transport.update({ cursor: 0, text: '' }, sendableRef.current, currentMain())
-
-          if (trimmed === '/quit' || trimmed === '/exit') {
-            quit()
-            return
-          }
 
           // The native atomic payload is its own prompt, not an instruction to
           // submit the local editor. Ordinary PTY Enter retains Ink's trimming.

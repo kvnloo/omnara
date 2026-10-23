@@ -67,10 +67,16 @@ pnpm --filter omnara exec vitest run src/tern/pty.test.ts
 It forks a real OS PTY, launches `runChat` with the real React hooks and SDK
 against the existing localhost fixture, and checks fragmented UTF-8 input,
 batched ordinary keys, bracketed multiline paste, interleaved APCs, `/ask`,
-the Ink-owned question and cooked quit at the exact SDK boundary. The owned
-peer only supplies TSP hello/ACK; **it is not the Tern application**. The
-test is skipped on Windows or when Python 3 is unavailable. Install Python 3
-before accepting this gate.
+the Ink-owned question and cooked quit at the exact SDK boundary. Exit sends
+no further editor frames on quit, waits for authentic in-flight frame ACKs
+(bounded to 450 ms if none arrive), and only then sends native surface close and
+restores the tty. The PTY test holds real observed ACKs during quit and
+asserts that close follows those ACKs. A **following owned shell sentinel**
+must receive only its own command; a separate case verifies that a missing
+ACK cannot hang exit. The test does not flush arbitrary
+user input. The owned peer only supplies TSP hello/ACK; **it is not the Tern
+application**. The test is skipped on Windows or when Python 3 is unavailable.
+Install Python 3 before accepting this gate.
 
 These checks are not a native terminal acceptance receipt. To run the real
 `runChat` CLI, `@omnara/sdk` client, and `@omnara/react` hooks against a

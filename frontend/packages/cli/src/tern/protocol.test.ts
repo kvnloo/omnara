@@ -200,6 +200,50 @@ describe('native transport invalid capability and credit guards', () => {
 })
 
 describe('native ACK ownership', () => {
+  it('waits for real frame ACKs before closing once', async () => {
+    const writes: string[] = []
+    const transport = new TernComposerTransport((data) => writes.push(data), {
+      r: 'hello',
+      v: 1,
+      term: 'tern',
+      kinds: ['col', 'editor'],
+      credits: 2,
+    })
+    transport.start({ text: '', cursor: 0 }, true)
+    transport.update({ text: '/quit', cursor: 5 }, true)
+    transport.beginClose()
+    transport.update({ text: '', cursor: 0 }, true)
+    expect(writes.filter((data) => data.includes('_tsp;x;'))).toHaveLength(0)
+    expect(writes.filter((data) => data.includes('_tsp;f;'))).toHaveLength(2)
+    const settled = transport.waitForOutstandingAcks(200)
+    transport.handleEvent({ ev: 'ack', sf: TERN_SURFACE_ID, s: 999 })
+    transport.handleEvent({ ev: 'ack', sf: 'different:session', s: 2 })
+    transport.handleEvent({ ev: 'ack', sf: TERN_SURFACE_ID, s: 1 })
+    transport.handleEvent({ ev: 'ack', sf: TERN_SURFACE_ID, s: 2 })
+    await expect(settled).resolves.toBe(true)
+    transport.stop()
+    transport.stop()
+    expect(writes.filter((data) => data.includes('_tsp;x;'))).toHaveLength(1)
+    await expect(transport.waitForOutstandingAcks(200)).resolves.toBe(true)
+  })
+
+  it('bounds a missing final ACK and cancels an abandoned close waiter', async () => {
+    const transport = new TernComposerTransport(() => undefined, {
+      r: 'hello',
+      v: 1,
+      term: 'tern',
+      kinds: ['col', 'editor'],
+      credits: 1,
+    })
+    transport.start({ text: '', cursor: 0 }, true)
+    transport.beginClose()
+    await expect(transport.waitForOutstandingAcks(15)).resolves.toBe(false)
+    const abandoned = transport.waitForOutstandingAcks(200)
+    transport.cancelAckWait()
+    await expect(abandoned).resolves.toBe(false)
+    transport.stop()
+  })
+
   it('never treats a future ACK as permission to send another frame', () => {
     const writes: string[] = []
     const transport = new TernComposerTransport(

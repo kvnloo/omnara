@@ -46,6 +46,9 @@ export class TernComposerTransport {
   private limit: number
   private seq = 0
   private started = false
+  private closing = false
+  private closed = false
+  private ackWait: { target: number; finish: (acknowledged: boolean) => void } | null = null
   private last: ComposerSnapshot = { cursor: 0, text: '' }
   private lastSendable = false
   private lastMain: readonly TernLiveNode[] = []
@@ -70,7 +73,7 @@ export class TernComposerTransport {
   }
 
   start(snapshot: ComposerSnapshot, sendable: boolean, main: readonly TernLiveNode[] = []): void {
-    if (this.started) return
+    if (this.started || this.closed) return
     this.started = true
     this.last = snapshot
     this.lastSendable = sendable
@@ -128,7 +131,7 @@ export class TernComposerTransport {
     sendable: boolean,
     main: readonly TernLiveNode[] = this.lastMain,
   ): void {
-    if (!this.started) return
+    if (!this.started || this.closing) return
 
     const next = {
       cursor: clamp(snapshot.cursor, snapshot.text.length),
@@ -167,18 +170,60 @@ export class TernComposerTransport {
       return
     }
     this.acked = Math.max(this.acked, event.s)
-    if (this.pending != null && this.seq - this.acked < this.credits) {
+    if (this.ackWait != null && this.acked >= this.ackWait.target) {
+      this.ackWait.finish(true)
+    }
+    if (!this.closing && this.pending != null && this.seq - this.acked < this.credits) {
       const pending = this.pending
       this.pending = null
       this.update(pending.snapshot, pending.sendable, pending.main)
     }
   }
 
-  stop(): void {
-    if (!this.started) return
-    this.started = false
+  /** Freeze frame production while the last actual frame ACK is drained. */
+  beginClose(): void {
+    if (!this.started || this.closing) return
+    this.closing = true
     this.pending = null
+  }
+
+  stop(): void {
+    if (!this.started || this.closed) return
+    this.beginClose()
+    this.closed = true
+    this.started = false
+    // Close follows the final ACK on the normal quit path, rather than racing
+    // the peer and leaving its frame replies for the following shell.
     this.write(encodeTspJson('x', { id: TERN_SURFACE_ID, keep: false }, this.limit))
+  }
+
+  /**
+   * An ACK acknowledges a real emitted frame, not the surface-close packet.
+   * Keep TSP input subscribed through the last outstanding frame ACK before
+   * sending surface close or returning the tty to its next owner.
+   * A missing peer must not trap exit.
+   */
+  waitForOutstandingAcks(timeoutMs: number): Promise<boolean> {
+    if (!this.closing) throw new Error('Quiesce native frames before draining their ACKs')
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 1) {
+      throw new RangeError('Invalid native ACK drain timeout')
+    }
+    if (this.acked >= this.seq) return Promise.resolve(true)
+    this.cancelAckWait()
+    return new Promise<boolean>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const finish = (acknowledged: boolean): void => {
+        if (this.ackWait?.finish === finish) this.ackWait = null
+        if (timer != null) clearTimeout(timer)
+        resolve(acknowledged)
+      }
+      this.ackWait = { target: this.seq, finish }
+      timer = setTimeout(() => finish(false), timeoutMs)
+    })
+  }
+
+  cancelAckWait(): void {
+    this.ackWait?.finish(false)
   }
 
   private ops(ops: TspJson[]): void {

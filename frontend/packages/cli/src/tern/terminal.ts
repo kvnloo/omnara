@@ -305,6 +305,15 @@ export class TernTerminal {
     }
   }
 
+  /**
+   * While waiting for a closing surface's outstanding ACKs, keep the real
+   * tty raw and the TSP mux attached, but pass ordinary keys to Ink rather
+   * than consuming them as edits to a closing composer.
+   */
+  handoffNativeKeysToInk(): void {
+    this.stdin.setNativeOwnership(false)
+  }
+
   endNativeOwnership(): void {
     let failure: unknown
     if (this.forcedRaw) {

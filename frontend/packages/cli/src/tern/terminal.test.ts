@@ -89,6 +89,21 @@ class RawTtyInput extends PassThrough {
 }
 
 describe('terminal restore on exit', () => {
+  it('filters delayed APCs while forwarding ordinary keys during an exit drain', () => {
+    const source = new RawTtyInput()
+    const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
+    const ink: string[] = []
+    terminal.stdin.on('data', (data: Buffer) => ink.push(data.toString()))
+    terminal.beginNativeOwnership()
+    terminal.handoffNativeKeysToInk()
+    source.write('user' + eventApc({ ev: 'ack', sf: 'omnara:session', s: 3 }) + ' input')
+    expect(ink.join('')).toBe('user input')
+    expect(source.isRaw).toBe(true)
+    terminal.endNativeOwnership()
+    expect(source.isRaw).toBe(false)
+    terminal.dispose()
+  })
+
   it('leaves the tty cooked, paused and unref’d after quitting from native ownership', () => {
     const source = new RawTtyInput()
     const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
