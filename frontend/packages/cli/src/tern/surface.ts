@@ -218,6 +218,12 @@ export function useTernComposerSurface({
         unsubscribe = terminal.subscribeEvents((event) => {
           if (lifecycle.cancelled || !owned) return
           transport.handleEvent(event)
+          // Once Tern acknowledges a frame after the PTY cleared the draft,
+          // a later native send is a new action, even if it shares a prefix
+          // with the previous PTY submission.
+          if (event.ev === 'ack' && event.sf === TERN_SURFACE_ID) {
+            lastPtySubmitted = undefined
+          }
 
           if (
             !('sf' in event) ||
