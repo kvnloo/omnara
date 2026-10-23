@@ -8,6 +8,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 
 import { createOmnaraClient } from '@omnara/sdk'
+import * as schemas from '@omnara/sdk/zod'
 
 import { runChat } from '../chat.tsx'
 import { resolveTernPresentation } from './config.ts'
@@ -61,8 +62,7 @@ const streams = new Set<ServerResponse>()
 let interaction: InteractionRecord | undefined
 let sequence = 0
 let turn = 0
-let busy = false
-let responseTimers = new Set<ReturnType<typeof setTimeout>>()
+const responseTimers = new Set<ReturnType<typeof setTimeout>>()
 
 function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' })
@@ -99,7 +99,6 @@ function completeTurn(turnIndex: number, input: string): void {
     content_blocks: [{ type: 'text' as const, text: 'Fixture echo: ' + input }],
     created_at: timestamp(),
   }
-  busy = false
   agent.activity.state = 'idle'
   broadcast(evt)
 }
@@ -140,7 +139,7 @@ const server = createServer(async (req, res) => {
         if (event.sequence > after) res.write('data: ' + JSON.stringify(event) + '\n\n')
       }
       res.write(': fixture connected\n\n')
-      req.on('close', () => streams.delete(res))
+      res.on('close', () => streams.delete(res))
       return
     }
     if (req.method === 'GET' && path === agentPath + '/inputs/backlog') {
@@ -152,15 +151,18 @@ const server = createServer(async (req, res) => {
       return
     }
     if (req.method === 'POST' && path === agentPath + '/inputs') {
-      const body = await requestBody(req)
-      if (body === null || typeof body !== 'object' || !('content_blocks' in body) ||
-        !Array.isArray(body.content_blocks)) {
+      const parsed = schemas.zCreateAgentInputBody.safeParse(await requestBody(req))
+      if (!parsed.success) {
         json(res, 400, { error: 'Invalid input body', code: 'invalid_argument' })
         return
       }
-      const blocks = body.content_blocks as { type?: string; text?: string }[]
-      const text = blocks.filter((block) => block.type === 'text' && block.text != null)
-        .map((block) => block.text).join('\n')
+      const blocks = parsed.data.content_blocks
+      const text = blocks
+        .filter((block) =>
+          block.type === 'text' && block.metadata?.omnara_hidden !== 'true',
+        )
+        .map((block) => block.type === 'text' ? block.text : '')
+        .join('\n')
       const inputID = fixtureId('ain', turn + 1)
       const createdAt = timestamp()
       const input = {
@@ -173,7 +175,6 @@ const server = createServer(async (req, res) => {
         queued_at: createdAt,
       }
       const currentTurn = ++turn
-      busy = true
       agent.activity.state = 'running'
       broadcast({
         id: fixtureId('evt', ++sequence),
@@ -224,11 +225,15 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === 'POST' && interaction != null &&
       path === agentPath + '/interactions/' + interaction.id + '/resolve') {
-      const answers = await requestBody(req)
+      const parsed = schemas.zResolveAgentInteractionBody.safeParse(await requestBody(req))
+      if (!parsed.success) {
+        json(res, 400, { error: 'Invalid interaction answers', code: 'invalid_argument' })
+        return
+      }
       const resolved = {
         ...interaction,
         state: 'resolved' as const,
-        resolution: answers,
+        resolution: parsed.data,
         resolved_at: timestamp(),
       }
       interaction = resolved as InteractionRecord

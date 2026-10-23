@@ -81,6 +81,7 @@ export function useTernComposerSurface({
     let owned = false
     let unsubscribe: (() => void) | undefined
     let unsubscribeKeys: (() => void) | undefined
+    let ownedTransport: TernComposerTransport | undefined
     let resume: (() => Promise<void>) | undefined
     const hello = surface.hello
     const projectMain = liveProjectionEnabled && supportsTernLiveSurface(hello)
@@ -92,8 +93,9 @@ export function useTernComposerSurface({
       unsubscribe = undefined
       unsubscribeKeys?.()
       unsubscribeKeys = undefined
-      const transport = transportRef.current
-      transportRef.current = null
+      const transport = ownedTransport
+      ownedTransport = undefined
+      if (transportRef.current === transport) transportRef.current = null
       let failed = false
       try {
         transport?.stop()
@@ -135,6 +137,7 @@ export function useTernComposerSurface({
           terminal.write(data)
         }, hello)
         transportRef.current = transport
+        ownedTransport = transport
         transport.start(
           { cursor: cursorRef.current, text: nativeTextRef.current },
           sendableRef.current,

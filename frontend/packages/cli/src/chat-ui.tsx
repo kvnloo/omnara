@@ -416,23 +416,27 @@ export function Chat({
   // RFC #12: only an idle composer receives native ownership by default.
   // #14/#15 streaming and direct-subagent projections are explicit opt-in.
   const idle = !chat.isWorking && chat.status !== 'submitted'
-  const nativeEnabled = ready && interaction == null && ternMode !== 'off' && (idle || liveProjectionEnabled)
+  const nativeEnabled =
+    ready && interaction == null && ternMode !== 'off' && (idle || liveProjectionEnabled)
   const nativeSendable = nativeEnabled && (idle || liveProjectionEnabled)
   const directSubagents = useMemo(
     () => subagents.data?.pages.flatMap((page) => page.data) ?? [],
     [subagents.data],
   )
   const nativeMain = useMemo(
-    () => liveProjectionEnabled ? [
-      ...projectTernSession({
-        messages: chat.messages,
-        backlog: chat.inputBacklog.inputs,
-        status: chat.status,
-        isWorking: chat.isWorking,
-        hasOlderMessages: chat.hasOlderMessages,
-      }),
-      ...projectTernSubagents(directSubagents, subagents.hasNextPage),
-    ] : [],
+    () =>
+      liveProjectionEnabled
+        ? [
+            ...projectTernSession({
+              messages: chat.messages,
+              backlog: chat.inputBacklog.inputs,
+              status: chat.status,
+              isWorking: chat.isWorking,
+              hasOlderMessages: chat.hasOlderMessages,
+            }),
+            ...projectTernSubagents(directSubagents, subagents.hasNextPage),
+          ]
+        : [],
     [
       liveProjectionEnabled,
       chat.hasOlderMessages,

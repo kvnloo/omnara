@@ -187,8 +187,8 @@ export function parseTspApc(data: string): TspEnvelope | null {
     if (!PARAM_PATTERN.test(segment)) break
     const eq = segment.indexOf('=')
     const name = segment.slice(0, eq)
-    // Only recognized framing parameters can precede a JSON body.
-    if (name !== 'c' && name !== 'm') break
+    // Tern consumes all syntactically valid parameters, including extensions.
+    // The assembler only interprets c/m, but unknown parameters are not body.
     params[name] = segment.slice(eq + 1)
     pos = semi + 1
   }

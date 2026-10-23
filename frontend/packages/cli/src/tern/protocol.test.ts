@@ -202,7 +202,7 @@ function parseLikeTern(raw: string) {
 describe('continuation boundaries under the full Tern wire grammar', () => {
   it('round-trips adversarial parameter-shaped prefixes and UTF-8 over chunk boundaries', () => {
     const input = { sf: 'omnara:session', s: 7,
-      ops: [['set', 'omnara:composer', { text: 'a'.repeat(122) + 'x=1;y=2;\n🌿👍🏽' .repeat(70) }]] }
+      ops: [['set', 'omnara:composer', { text: 'a'.repeat(122) + 'x=1;y=2;\n🌿👍🏽'.repeat(70) }]] }
     const body = JSON.stringify(input)
     const wire = encodeTspMessage('f', body, 128)
     const packets = wire.split('\x1b\\').filter(Boolean).map((part) => part.slice(2))

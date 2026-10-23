@@ -60,7 +60,7 @@ describe('native ownership input routing', () => {
     terminal.endNativeOwnership()
     source.write('d')
 
-    expect(keys).toEqual(['bc'])
+    expect(keys).toEqual(['b', 'c'])
     expect(inkInput.join('')).toBe('ad')
     // Bracketed paste is on only while the native composer owns input.
     expect(output).toEqual(['\x1b[?2004h', '\x1b[?2004l'])
@@ -181,8 +181,10 @@ describe('mixed APC and pty key ordering', () => {
     })
     terminal.beginNativeOwnership()
 
-    const edit = { ev: 'edit', sf: 'omnara:session', id: 'omnara:composer',
-      from: 0, to: 1, text: 'b', cursor: 1, len: 1 }
+    const edit = {
+      ev: 'edit', sf: 'omnara:session', id: 'omnara:composer',
+      from: 0, to: 1, text: 'b', cursor: 1, len: 1,
+    }
     source.write('a' + eventApc(edit))
     expect(draft).toBe('b')
     source.write(eventApc({ ...edit, from: 1, to: 1, text: '🌿', cursor: 3, len: 1 }) + 'c')
@@ -199,8 +201,10 @@ describe('mixed APC and pty key ordering', () => {
     terminal.subscribeKeys((s) => calls.push('key:' + s))
     terminal.subscribeEvents((e) => calls.push('event:' + e.ev))
     terminal.beginNativeOwnership()
-    const edit = eventApc({ ev: 'edit', sf: 'omnara:session', id: 'omnara:composer',
-      from: 0, to: 0, text: 'b', cursor: 1, len: 0 })
+    const edit = eventApc({
+      ev: 'edit', sf: 'omnara:session', id: 'omnara:composer',
+      from: 0, to: 0, text: 'b', cursor: 1, len: 0,
+    })
     source.write(edit.slice(0, 5))
     source.write(edit.slice(5) + 'a\x1b_ts')
     source.write('p;e;{"ev":"theme","dark":true}\x1b\\z')

@@ -5,8 +5,8 @@ import * as z from 'zod'
 import { runChat } from './chat.tsx'
 import { customOp, parseNumberFlag, parseWithSchema } from './factory.ts'
 import { canPromptInteractively, promptAgentSelection } from './interactive.ts'
-import { resolveTernPresentation } from './tern/config.ts'
 import { CliInputError } from './output.ts'
+import { resolveTernPresentation } from './tern/config.ts'
 
 export const agentChatOp = customOp({
   verb: 'chat',
@@ -26,10 +26,14 @@ export const agentChatOp = customOp({
       args[0] ?? (await promptAgentSelection(client, path.orgID, path.projectID)),
       'agent id',
     )
-    await runChat(client, { ...path, agentID }, resolveTernPresentation({
-      ternLive: options.ternLive === true,
-      tern: options.tern !== false,
-    }))
+    await runChat(
+      client,
+      { ...path, agentID },
+      resolveTernPresentation({
+        ternLive: options.ternLive === true,
+        tern: options.tern !== false,
+      }),
+    )
   },
 })
 
