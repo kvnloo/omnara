@@ -236,7 +236,9 @@ describe('partial acquisition and rejected surface restoration', () => {
         if (data === '\x1b[?2004h') throw new Error('tty output failed')
       },
     })
-    terminal.stdin.on('data', (data: Buffer) => ink.push(data.toString()))
+    terminal.stdin.on('data', (data: Buffer) => {
+      ink.push(data.toString())
+    })
     expect(() => terminal.beginNativeOwnership()).toThrow('tty output failed')
     expect(source.isRaw).toBe(false)
     expect(source.refs).toBe(0)
@@ -254,7 +256,9 @@ describe('partial acquisition and rejected surface restoration', () => {
         if (data === '\x1b[?2004l') throw new Error('paste cleanup failed')
       },
     })
-    terminal.stdin.on('data', (data: Buffer) => ink.push(data.toString()))
+    terminal.stdin.on('data', (data: Buffer) => {
+      ink.push(data.toString())
+    })
     terminal.probe()
     source.write(helloApc())
     terminal.beginNativeOwnership()
