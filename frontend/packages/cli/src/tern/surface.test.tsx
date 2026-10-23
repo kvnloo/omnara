@@ -173,9 +173,10 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, onSend)
     try {
       await activate(fixture)
-      fixture.source.write('hello 🌍\\n第二行\\r'.replace('\\n', '\n').replace('\\r', '\r'))
+      fixture.source.write('hello 🌍\n第二行\r')
       await vi.waitFor(() => {
-        expect(onSend).toHaveBeenCalledExactlyOnceWith('hello 🌍\n第二行')
+        expect(onSend).toHaveBeenCalledTimes(1)
+        expect(onSend).toHaveBeenCalledWith('hello 🌍\n第二行')
       })
     } finally {
       fixture.dispose()
@@ -246,10 +247,14 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       await activate(fixture)
       fixture.source.write('/a' + event({ ev: 'ack', sf: 'omnara:session', s: 1 }))
       fixture.rerender(mode)
-      fixture.source.write(event({ ev: 'resize', sf: 'omnara:session', cols: 100, visible: true }))
+      fixture.source.write(
+        event({ ev: 'resize', sf: 'omnara:session', cols: 100, visible: true }),
+      )
       fixture.source.write('s' + event({ ev: 'theme', dark: false }))
       fixture.rerender(mode)
-      fixture.source.write(event({ ev: 'focus', sf: 'omnara:session', id: 'omnara:composer' }) + 'k\r')
+      fixture.source.write(
+        event({ ev: 'focus', sf: 'omnara:session', id: 'omnara:composer' }) + 'k\r',
+      )
       await vi.waitFor(() => {
         expect(sent).toEqual(['/ask'])
       })
@@ -305,7 +310,9 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       fixture.rerender({ ...mode, enabled: false })
       fixture.rerender(mode)
       await vi.waitFor(() => {
-        expect(fixture.writes.filter((part) => part.includes('\x1b[?2004h')).length).toBeGreaterThan(1)
+        expect(
+          fixture.writes.filter((part) => part.includes('\x1b[?2004h')).length,
+        ).toBeGreaterThan(1)
       })
       fixture.source.write('/')
       fixture.rerender(mode)
