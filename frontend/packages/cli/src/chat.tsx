@@ -4,8 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from 'ink'
 
 import { Chat } from './chat-ui.tsx'
-import { TernTerminal } from './tern/terminal.ts'
 import type { TernPresentationMode } from './tern/config.ts'
+import { TernTerminal } from './tern/terminal.ts'
 
 export async function runChat(
   client: OmnaraClient,
