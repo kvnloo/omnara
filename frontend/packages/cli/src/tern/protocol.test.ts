@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import * as z from 'zod'
 
 import {
   applyTernComposerEdit,
@@ -220,12 +221,21 @@ describe('continuation boundaries under the full Tern wire grammar', () => {
     expect(JSON.parse(joined)).toEqual(input)
   })
 
+  it('keeps long ASCII JSON runs near the negotiated body-size packet count', () => {
+    const body = JSON.stringify({ text: 'a'.repeat(4096) })
+    const packets = encodeTspMessage('f', body, 128).split('\\x1b\\\\').filter(Boolean)
+    // Full-size safe continuations must not collapse into one-byte packets.
+    expect(packets.length).toBeLessThanOrEqual(40)
+    const decoded = packets.map((packet) => parseLikeTern(packet.slice(2)).body).join('')
+    expect(decoded).toBe(body)
+  })
+
   it('handles a long ASCII run bordering a key=value; segment without content loss', () => {
     const text = 'x'.repeat(250) + '=1;y'.repeat(75) + '🍃'.repeat(40)
     const body = JSON.stringify({ text })
     const packets = encodeTspMessage('f', body, 128).split('\x1b\\').filter(Boolean)
     const joined = packets.map((s) => parseLikeTern(s.slice(2)).body).join('')
     expect(joined).toBe(body)
-    expect(JSON.parse(joined).text).toBe(text)
+    expect(z.object({ text: z.string() }).parse(JSON.parse(joined)).text).toBe(text)
   })
 })
