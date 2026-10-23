@@ -44,6 +44,9 @@ export function useTernComposerSurface({
   )
   const callbacksRef = useRef({ onDraftChange, onQuit, onSend })
   const draftRef = useRef(draft)
+  // React may render an older draft between successive PTY reads. Hold only the
+  // latest application-owned write until its state update reaches React.
+  const pendingDraftRef = useRef<string | null>(null)
   const nativeTextRef = useRef(draft)
   const cursorRef = useRef(draft.length)
   const sendableRef = useRef(sendable)
@@ -52,9 +55,12 @@ export function useTernComposerSurface({
 
   useEffect(() => {
     callbacksRef.current = { onDraftChange, onQuit, onSend }
-    draftRef.current = draft
     sendableRef.current = sendable
     mainRef.current = main
+    if (draft === pendingDraftRef.current) pendingDraftRef.current = null
+    // A previous React render must not roll back uncommitted native PTY bytes.
+    // When ownership ends, this ref still holds the most recent local draft.
+    if (pendingDraftRef.current === null) draftRef.current = draft
   }, [draft, main, onDraftChange, onQuit, onSend, sendable])
 
   useEffect(() => {
@@ -86,6 +92,9 @@ export function useTernComposerSurface({
     const hello = surface.hello
     const projectMain = liveProjectionEnabled && supportsTernLiveSurface(hello)
     let lastSubmitted: string | undefined
+    let lastPtySubmitted: string | undefined
+    let ptyEdited = false
+    let quitting = false
 
     const teardown = (): void => {
       unsubscribe?.()
@@ -119,6 +128,27 @@ export function useTernComposerSurface({
       if (failed) terminal.disableNativeSurface()
     }
 
+    const quit = (): void => {
+      if (lifecycle.cancelled || quitting) return
+      quitting = true
+      // Release native input and paste mode before resuming Ink to exit. Ink
+      // may reacquire raw mode during resume; runChat.dispose() cooks it again.
+      const restore = resume
+      resume = undefined
+      teardown()
+      if (restore == null) {
+        callbacksRef.current.onQuit()
+        return
+      }
+      void restore()
+        .catch(() => {
+          terminal.disableNativeSurface()
+        })
+        .then(() => {
+          callbacksRef.current.onQuit()
+        })
+    }
+
     void (async () => {
       try {
         const suspension = await suspendTerminal()
@@ -149,27 +179,36 @@ export function useTernComposerSurface({
           projectMain ? mainRef.current : []
 
         const applyDraft = (next: { cursor: number; text: string }): void => {
-          if (next.text !== nativeTextRef.current) lastSubmitted = undefined
+          if (next.text !== nativeTextRef.current) {
+            lastSubmitted = undefined
+            lastPtySubmitted = undefined
+          }
           nativeTextRef.current = next.text
           cursorRef.current = next.cursor
+          draftRef.current = next.text
+          pendingDraftRef.current = next.text
           callbacksRef.current.onDraftChange(next.text)
           transport.update(next, sendableRef.current, currentMain())
         }
 
-        const submit = (text: string): void => {
-          if (lifecycle.cancelled || !owned || !sendableRef.current) return
+        const submit = (text: string, fromPty = false): void => {
+          if (lifecycle.cancelled || quitting || !owned || !sendableRef.current) return
           const trimmed = text.trim()
           if (trimmed === '' || lastSubmitted === text) return
           // Atomic event text is independent of the editor draft. Reject repeat
           // delivery of the same prompt, not a distinct prompt still marked sendable.
           lastSubmitted = text
+          lastPtySubmitted = fromPty ? text : undefined
+          ptyEdited = false
           nativeTextRef.current = ''
           cursorRef.current = 0
+          draftRef.current = ''
+          pendingDraftRef.current = ''
           callbacksRef.current.onDraftChange('')
           transport.update({ cursor: 0, text: '' }, sendableRef.current, currentMain())
 
           if (trimmed === '/quit' || trimmed === '/exit') {
-            callbacksRef.current.onQuit()
+            quit()
             return
           }
 
@@ -191,26 +230,41 @@ export function useTernComposerSurface({
 
           if (event.ev === 'edit') {
             const next = applyTernComposerEdit(nativeTextRef.current, event)
-            if (next != null) applyDraft(next)
+            if (next != null) {
+              ptyEdited = false
+              applyDraft(next)
+            }
             return
           }
 
           if (event.ev !== 'send') return
-          submit(event.text)
+          // Tern can send the editor's last rendered prefix before its latest
+          // ACK. Typed keys are already applied to the application draft: use
+          // that text when the event is an older prefix (or vice versa after a
+          // backspace). A distinct atomic send still uses its own event text.
+          const local = nativeTextRef.current
+          if (lastPtySubmitted != null && event.text !== '' &&
+              lastPtySubmitted.startsWith(event.text)) return
+          const stale =
+            ptyEdited &&
+            (event.text === '' || local.startsWith(event.text) || event.text.startsWith(local))
+          submit(stale ? local : event.text)
         })
 
         // Ordinary typing still arrives on the pty while Tern draws the editor.
         const keys = new TernComposerKeyDecoder()
         unsubscribeKeys = terminal.subscribeKeys((input) => {
+          if (lifecycle.cancelled || quitting || !owned) return
           for (const key of keys.push(input)) {
             if (key.kind === 'quit') {
-              callbacksRef.current.onQuit()
+              quit()
               return
             }
             if (key.kind === 'submit') {
-              submit(nativeTextRef.current)
+              submit(nativeTextRef.current, true)
               continue
             }
+            ptyEdited = true
             applyDraft(
               applyTernComposerKey({ cursor: cursorRef.current, text: nativeTextRef.current }, key),
             )
@@ -233,11 +287,10 @@ export function useTernComposerSurface({
     const transport = transportRef.current
     if (transport == null) return
 
-    if (draft !== nativeTextRef.current) {
-      nativeTextRef.current = draft
-      cursorRef.current = draft.length
-    }
-
+    // Do not reconcile nativeTextRef from the React prop here. Incremental
+    // PTY bytes can be newer than a scheduled React render of the same draft.
+    // The native model is updated synchronously before notifying React; it is
+    // adopted from the canonical prop again on each new ownership lifecycle.
     const projectMain =
       liveProjectionEnabled &&
       surface.status === 'active' &&
