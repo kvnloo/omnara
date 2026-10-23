@@ -362,8 +362,12 @@ async function main(): Promise<void> {
     if (process.argv.includes('--assert-ask')) {
       const exact = sdkPosts.filter((text) => text === '/ask').length
       const truncated = sdkPosts.filter((text) => text === '/').length
-      if (exact !== 1 || truncated !== 0 || interactionsOpened !== 1 ||
-          interactionsResolved !== 1) {
+      if (
+        exact !== 1 ||
+        truncated !== 0 ||
+        interactionsOpened !== 1 ||
+        interactionsResolved !== 1
+      ) {
         throw new Error(
           'Native /ask proof failed: exact=' + String(exact) +
             ', truncated=' + String(truncated) +
@@ -371,7 +375,9 @@ async function main(): Promise<void> {
             ', resolved=' + String(interactionsResolved),
         )
       }
-      process.stderr.write('Native /ask proof: one exact SDK POST, interaction opened and resolved; TTY cooked.\n')
+      process.stderr.write(
+        'Native /ask proof: one exact SDK POST, interaction opened and resolved; TTY cooked.\n',
+      )
     }
   } finally {
     for (const timer of responseTimers) clearTimeout(timer)
