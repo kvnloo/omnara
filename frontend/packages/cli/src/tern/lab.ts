@@ -204,18 +204,18 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
       broadcast(
         JSON.stringify(
           schemas.zAgentInputEvent.parse({
-        id: fixtureId('evt', ++sequence),
-        org_id: scope.orgID,
-        project_id: scope.projectID,
-        agent_id: scope.agentID,
-        turn_id: fixtureId('trn', currentTurn),
-        turn_sequence: currentTurn,
-        is_opening_event: true,
-        sequence,
-        event_kind: 'agent_input',
-        agent_input_id: inputID,
-        input_kind: 'content',
-        content_blocks: storedBlocks,
+            id: fixtureId('evt', ++sequence),
+            org_id: scope.orgID,
+            project_id: scope.projectID,
+            agent_id: scope.agentID,
+            turn_id: fixtureId('trn', currentTurn),
+            turn_sequence: currentTurn,
+            is_opening_event: true,
+            sequence,
+            event_kind: 'agent_input',
+            agent_input_id: inputID,
+            input_kind: 'content',
+            content_blocks: storedBlocks,
             created_at: createdAt,
           }),
         ),
@@ -246,8 +246,8 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
         broadcast(
           JSON.stringify({
             tool_call_id: interaction.tool_call_id,
-          agent_id: scope.agentID,
-          state: 'waiting',
+            agent_id: scope.agentID,
+            state: 'waiting',
             interaction_update: { id: interaction.id, interaction_kind: 'question', state: 'open' },
           }),
         )
@@ -287,8 +287,8 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
       broadcast(
         JSON.stringify({
           tool_call_id: interaction.tool_call_id,
-        agent_id: scope.agentID,
-        state: 'completed',
+          agent_id: scope.agentID,
+          state: 'completed',
           interaction_update: { id: interaction.id, interaction_kind: 'question', state: 'resolved' },
         }),
       )
