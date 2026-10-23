@@ -35,10 +35,11 @@ interface Mode {
 interface Props extends Mode {
   terminal: TernTerminal
   onSend: (text: string) => Promise<void>
+  onQuit?: () => void
   main?: readonly TernLiveNode[]
 }
 
-function Harness({ terminal, onSend, main = [], ...mode }: Props) {
+function Harness({ terminal, onSend, onQuit = () => undefined, main = [], ...mode }: Props) {
   const [draft, setDraft] = useState('')
   useTernComposerSurface({
     terminal,
@@ -47,7 +48,7 @@ function Harness({ terminal, onSend, main = [], ...mode }: Props) {
     main,
     draft,
     onDraftChange: setDraft,
-    onQuit: () => undefined,
+    onQuit,
     onSend,
   })
   return <Text>Ink draft: {draft}</Text>
@@ -61,7 +62,11 @@ const event = (data: TspJson) => '\x1b_tsp;e;' + JSON.stringify(data) + '\x1b\\'
 const send = (text: string) =>
   event({ ev: 'send', sf: 'omnara:session', id: 'omnara:composer', text })
 
-function mount(mode: Mode, onSend: (text: string) => Promise<void>) {
+function mount(
+  mode: Mode,
+  onSend: (text: string) => Promise<void>,
+  onQuit?: () => void,
+) {
   const source = new FakeTty()
   const stdout = Object.assign(new PassThrough(), {
     isTTY: true,
@@ -73,7 +78,7 @@ function mount(mode: Mode, onSend: (text: string) => Promise<void>) {
     writes.push(chunk.toString())
   })
   const terminal = new TernTerminal(source, stdout)
-  const props: Props = { ...mode, terminal, onSend }
+  const props: Props = { ...mode, terminal, onSend, onQuit }
   const app = render(<Harness {...props} />, {
     stdin: terminal.inkStdin(),
     // SAFETY: Ink uses .write, isTTY and dimensions; the writable fixture provides them.
@@ -161,6 +166,181 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       for (const resolve of complete) resolve()
       fixture.dispose()
     }
+  })
+
+  it('sends exact PTY text once when typed bytes and Enter share a read', async () => {
+    const onSend = vi.fn((_text: string) => Promise.resolve())
+    const fixture = mount({ enabled: true, idle: true, liveProjectionEnabled: false }, onSend)
+    try {
+      await activate(fixture)
+      fixture.source.write('hello 🌍\\n第二行\\r'.replace('\\n', '\n').replace('\\r', '\r'))
+      await vi.waitFor(() => {
+        expect(onSend).toHaveBeenCalledExactlyOnceWith('hello 🌍\n第二行')
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('assembles split reads with intervening React renders before sending /ask', async () => {
+    const sent: string[] = []
+    const mode = { enabled: true, idle: true, liveProjectionEnabled: false }
+    const fixture = mount(mode, (text) => {
+      sent.push(text)
+      return Promise.resolve()
+    })
+    try {
+      await activate(fixture)
+      for (const part of ['/', 'a', 's', 'k']) {
+        fixture.source.write(part)
+        // Force React through unrelated props while each state update may lag.
+        fixture.rerender(mode)
+        await Promise.resolve()
+      }
+      fixture.source.write('\r')
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['/ask'])
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('preserves fragmented UTF-8 bytes and a bracketed multiline paste', async () => {
+    const sent: string[] = []
+    const fixture = mount(
+      { enabled: true, idle: true, liveProjectionEnabled: false },
+      (text) => {
+        sent.push(text)
+        return Promise.resolve()
+      },
+    )
+    try {
+      await activate(fixture)
+      const utf8 = Buffer.from('hè 🌍 第二行', 'utf8')
+      for (let offset = 0; offset < utf8.length; offset += 1) {
+        fixture.source.write(utf8.subarray(offset, offset + 1))
+      }
+      fixture.source.write('\r')
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['hè 🌍 第二行'])
+      })
+      fixture.source.write('\x1b[200~line one\r\n第二行')
+      fixture.source.write('\r第三行\x1b[201~\r')
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['hè 🌍 第二行', 'line one\n第二行\n第三行'])
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('keeps PTY draft intact across interleaved APC ACK, resize, theme and focus', async () => {
+    const sent: string[] = []
+    const mode = { enabled: true, idle: true, liveProjectionEnabled: false }
+    const fixture = mount(mode, (text) => {
+      sent.push(text)
+      return Promise.resolve()
+    })
+    try {
+      await activate(fixture)
+      fixture.source.write('/a' + event({ ev: 'ack', sf: 'omnara:session', s: 1 }))
+      fixture.rerender(mode)
+      fixture.source.write(event({ ev: 'resize', sf: 'omnara:session', cols: 100, visible: true }))
+      fixture.source.write('s' + event({ ev: 'theme', dark: false }))
+      fixture.rerender(mode)
+      fixture.source.write(event({ ev: 'focus', sf: 'omnara:session', id: 'omnara:composer' }) + 'k\r')
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['/ask'])
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('does not submit a stale native prefix or duplicate the PTY Enter submission', async () => {
+    const sent: string[] = []
+    const fixture = mount(
+      { enabled: true, idle: true, liveProjectionEnabled: false },
+      (text) => {
+        sent.push(text)
+        return Promise.resolve()
+      },
+    )
+    try {
+      await activate(fixture)
+      fixture.source.write('/ask')
+      fixture.source.write(send('/'))
+      fixture.source.write('\r')
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['/ask'])
+      })
+      // A late TSP send from the stale rendered editor is not a new prompt.
+      fixture.source.write('/ask\r' + send('/'))
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['/ask', '/ask'])
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('retains /ask after busy-to-idle and Ink interaction handoffs', async () => {
+    const sent: string[] = []
+    const mode = { enabled: true, idle: true, liveProjectionEnabled: false }
+    const fixture = mount(mode, (text) => {
+      sent.push(text)
+      return Promise.resolve()
+    })
+    try {
+      await activate(fixture)
+      fixture.source.write('first 🌿\r')
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['first 🌿'])
+      })
+      fixture.rerender({ ...mode, idle: false })
+      await vi.waitFor(() => {
+        expect(fixture.source.isRaw).toBe(false)
+      })
+      fixture.rerender({ ...mode, enabled: false })
+      fixture.rerender(mode)
+      await vi.waitFor(() => {
+        expect(fixture.writes.filter((part) => part.includes('\x1b[?2004h')).length).toBeGreaterThan(1)
+      })
+      fixture.source.write('/')
+      fixture.rerender(mode)
+      fixture.source.write('a')
+      fixture.rerender(mode)
+      fixture.source.write('sk\r')
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['first 🌿', '/ask'])
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('restores the terminal and exits once after /quit from real PTY bytes', async () => {
+    const onQuit = vi.fn()
+    const onSend = vi.fn((_text: string) => Promise.resolve())
+    const fixture = mount(
+      { enabled: true, idle: true, liveProjectionEnabled: false },
+      onSend,
+      onQuit,
+    )
+    try {
+      await activate(fixture)
+      fixture.source.write('/quit\r')
+      await vi.waitFor(() => {
+        expect(onQuit).toHaveBeenCalledTimes(1)
+      })
+      expect(onSend).not.toHaveBeenCalled()
+    } finally {
+      fixture.dispose()
+    }
+    expect(fixture.source.isRaw).toBe(false)
+    expect(fixture.source.refs).toBe(0)
+    expect(fixture.source.isPaused()).toBe(true)
   })
 
   it('closes idle native ownership during work and an interaction, then resumes', async () => {
