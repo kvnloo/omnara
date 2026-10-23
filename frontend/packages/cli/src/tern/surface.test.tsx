@@ -434,15 +434,12 @@ describe('mounted Ink/Tern composer lifecycle', () => {
       expect(frames.length).toBeGreaterThan(1)
       expect(
         frames.some((frame) =>
-          frame.ops.some(
-            (op) =>
-              op[0] === 'set' &&
-              op[1] === 'omnara:composer' &&
-              typeof op[2] === 'object' &&
-              op[2] !== null &&
-              'text' in op[2] &&
-              op[2].text === '',
-          ),
+          frame.ops.some((op) => {
+            if (op[0] !== 'set' || op[1] !== 'omnara:composer') return false
+            // SAFETY: This transport emits composer set operations with typed editor props.
+            const props = op[2] as { text?: string }
+            return props.text === ''
+          }),
         ),
       ).toBe(false)
       expect(fixture.writes.join('')).not.toContain('\x1b_tsp;x;')
