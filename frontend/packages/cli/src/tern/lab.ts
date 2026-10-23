@@ -201,7 +201,9 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
       })
       const currentTurn = ++turn
       activity.state = 'running'
-      broadcast(JSON.stringify(schemas.zAgentInputEvent.parse({
+      broadcast(
+        JSON.stringify(
+          schemas.zAgentInputEvent.parse({
         id: fixtureId('evt', ++sequence),
         org_id: scope.orgID,
         project_id: scope.projectID,
@@ -214,8 +216,11 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
         agent_input_id: inputID,
         input_kind: 'content',
         content_blocks: storedBlocks,
-        created_at: createdAt,
-      })), sequence)
+            created_at: createdAt,
+          }),
+        ),
+        sequence,
+      )
       json(res, 201, JSON.stringify({ agent_input: input }))
       if (text.trim().startsWith('/ask')) {
         interaction = schemas.zAgentInteraction.parse({
@@ -238,12 +243,14 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
           created_at: timestamp(),
         })
         activity.state = 'waiting_on_interaction'
-        broadcast(JSON.stringify({
-          tool_call_id: interaction.tool_call_id,
+        broadcast(
+          JSON.stringify({
+            tool_call_id: interaction.tool_call_id,
           agent_id: scope.agentID,
           state: 'waiting',
-          interaction_update: { id: interaction.id, interaction_kind: 'question', state: 'open' },
-        }))
+            interaction_update: { id: interaction.id, interaction_kind: 'question', state: 'open' },
+          }),
+        )
       } else {
         const timer = setTimeout(() => {
           responseTimers.delete(timer)
@@ -277,12 +284,14 @@ async function respond(req: IncomingMessage, res: ServerResponse): Promise<void>
       })
       interaction = resolved
       json(res, 200, JSON.stringify(resolved))
-      broadcast(JSON.stringify({
-        tool_call_id: interaction.tool_call_id,
+      broadcast(
+        JSON.stringify({
+          tool_call_id: interaction.tool_call_id,
         agent_id: scope.agentID,
         state: 'completed',
-        interaction_update: { id: interaction.id, interaction_kind: 'question', state: 'resolved' },
-      }))
+          interaction_update: { id: interaction.id, interaction_kind: 'question', state: 'resolved' },
+        }),
+      )
       completeTurn(turn, 'interaction resolved')
       return
     }
