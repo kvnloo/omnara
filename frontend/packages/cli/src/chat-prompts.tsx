@@ -46,7 +46,9 @@ export function TextInput({
     const current = textRef.current
     if (key.return) {
       textRef.current = ''
-      pendingRef.current = null
+      // The parent clears its controlled value on submission. Until that
+      // renders, earlier pending edits must not repopulate the next draft.
+      pendingRef.current = ''
       onSubmit(current)
       return
     }
