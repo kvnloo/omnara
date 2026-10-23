@@ -91,7 +91,7 @@ export function useTernComposerSurface({
     let resume: (() => Promise<void>) | undefined
     const hello = surface.hello
     const projectMain = liveProjectionEnabled && supportsTernLiveSurface(hello)
-    let lastSubmitted: string | undefined
+    let lastAtomicSend: string | undefined
     let quitting = false
 
     const teardown = (): void => {
@@ -177,7 +177,7 @@ export function useTernComposerSurface({
           projectMain ? mainRef.current : []
 
         const applyDraft = (next: { cursor: number; text: string }): void => {
-          if (next.text !== nativeTextRef.current) lastSubmitted = undefined
+          if (next.text !== nativeTextRef.current) lastAtomicSend = undefined
           nativeTextRef.current = next.text
           cursorRef.current = next.cursor
           draftRef.current = next.text
@@ -189,10 +189,10 @@ export function useTernComposerSurface({
         const submit = (text: string, fromPty = false): void => {
           if (lifecycle.cancelled || quitting || !owned || !sendableRef.current) return
           const trimmed = text.trim()
-          if (trimmed === '' || lastSubmitted === text) return
-          // Atomic event text is independent of the editor draft. Reject repeat
-          // delivery of the same prompt, not a distinct prompt still marked sendable.
-          lastSubmitted = text
+          if (trimmed === '' || (!fromPty && lastAtomicSend === text)) return
+          // A repeated atomic event is suppressible until the next edit, but
+          // an ordinary PTY Enter is a separate action even for equal text.
+          lastAtomicSend = fromPty ? undefined : text
           nativeTextRef.current = ''
           cursorRef.current = 0
           draftRef.current = ''

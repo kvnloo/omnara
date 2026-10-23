@@ -379,6 +379,29 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     }
   })
 
+  it('does not conflate PTY Enter with an identical independent atomic send', async () => {
+    const sent: string[] = []
+    const fixture = mount(
+      { enabled: true, idle: true, liveProjectionEnabled: false },
+      (text) => {
+        sent.push(text)
+        return Promise.resolve()
+      },
+    )
+    try {
+      await activate(fixture)
+      fixture.source.write('same' + '\r')
+      fixture.source.write(send('same'))
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['same', 'same'])
+      })
+      fixture.source.write(send('same'))
+      expect(sent).toEqual(['same', 'same'])
+    } finally {
+      fixture.dispose()
+    }
+  })
+
   it('retains /ask after busy-to-idle and Ink interaction handoffs', async () => {
     const sent: string[] = []
     const mode = { enabled: true, idle: true, liveProjectionEnabled: false }
