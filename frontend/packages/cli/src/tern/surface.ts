@@ -92,8 +92,6 @@ export function useTernComposerSurface({
     const hello = surface.hello
     const projectMain = liveProjectionEnabled && supportsTernLiveSurface(hello)
     let lastSubmitted: string | undefined
-    let lastPtySubmitted: string | undefined
-    let ptyEdited = false
     let quitting = false
 
     const teardown = (): void => {
@@ -179,10 +177,7 @@ export function useTernComposerSurface({
           projectMain ? mainRef.current : []
 
         const applyDraft = (next: { cursor: number; text: string }): void => {
-          if (next.text !== nativeTextRef.current) {
-            lastSubmitted = undefined
-            lastPtySubmitted = undefined
-          }
+          if (next.text !== nativeTextRef.current) lastSubmitted = undefined
           nativeTextRef.current = next.text
           cursorRef.current = next.cursor
           draftRef.current = next.text
@@ -198,8 +193,6 @@ export function useTernComposerSurface({
           // Atomic event text is independent of the editor draft. Reject repeat
           // delivery of the same prompt, not a distinct prompt still marked sendable.
           lastSubmitted = text
-          lastPtySubmitted = fromPty ? text : undefined
-          ptyEdited = false
           nativeTextRef.current = ''
           cursorRef.current = 0
           draftRef.current = ''
@@ -212,19 +205,14 @@ export function useTernComposerSurface({
             return
           }
 
-          void callbacksRef.current.onSend(trimmed).catch(() => undefined)
+          // The native atomic payload is its own prompt, not an instruction to
+          // submit the local editor. Ordinary PTY Enter retains Ink's trimming.
+          void callbacksRef.current.onSend(fromPty ? trimmed : text).catch(() => undefined)
         }
 
         unsubscribe = terminal.subscribeEvents((event) => {
           if (lifecycle.cancelled || !owned) return
           transport.handleEvent(event)
-          // Once Tern acknowledges a frame after the PTY cleared the draft,
-          // a later native send is a new action, even if it shares a prefix
-          // with the previous PTY submission.
-          if (event.ev === 'ack' && event.sf === TERN_SURFACE_ID) {
-            lastPtySubmitted = undefined
-          }
-
           if (
             !('sf' in event) ||
             event.sf !== TERN_SURFACE_ID ||
@@ -236,31 +224,15 @@ export function useTernComposerSurface({
 
           if (event.ev === 'edit') {
             const next = applyTernComposerEdit(nativeTextRef.current, event)
-            if (next != null) {
-              ptyEdited = false
-              applyDraft(next)
-            }
+            if (next != null) applyDraft(next)
             return
           }
 
           if (event.ev !== 'send') return
-          // Tern can send the editor's last rendered prefix before its latest
-          // ACK. Typed keys are already applied to the application draft: use
-          // that text when the event is an older prefix (or vice versa after a
-          // backspace). A distinct atomic send still uses its own event text.
-          const local = nativeTextRef.current
-          if (
-            lastPtySubmitted != null &&
-            pendingDraftRef.current === '' &&
-            event.text !== '' &&
-            lastPtySubmitted.startsWith(event.text)
-          ) {
-            return
-          }
-          const stale =
-            ptyEdited &&
-            (event.text === '' || local.startsWith(event.text) || event.text.startsWith(local))
-          submit(stale ? local : event.text)
+          // TSP native send is an independent prompt; it does not submit the
+          // current PTY draft. Equality, prefixes and ACK timing are not
+          // evidence that Tern supplied stale text.
+          submit(event.text)
         })
 
         // Ordinary typing still arrives on the pty while Tern draws the editor.
@@ -276,7 +248,6 @@ export function useTernComposerSurface({
               submit(nativeTextRef.current, true)
               continue
             }
-            ptyEdited = true
             applyDraft(
               applyTernComposerKey({ cursor: cursorRef.current, text: nativeTextRef.current }, key),
             )

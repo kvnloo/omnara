@@ -262,7 +262,7 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     }
   })
 
-  it('does not submit a stale native prefix or duplicate the PTY Enter submission', async () => {
+  it('submits a native atomic prefix instead of the longer PTY draft', async () => {
     const sent: string[] = []
     const fixture = mount(
       { enabled: true, idle: true, liveProjectionEnabled: false },
@@ -273,23 +273,40 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     )
     try {
       await activate(fixture)
-      fixture.source.write('/ask')
-      fixture.source.write(send('/'))
-      fixture.source.write('\r')
+      fixture.source.write('foobar')
+      fixture.source.write(send('foo'))
       await vi.waitFor(() => {
-        expect(sent).toEqual(['/ask'])
+        expect(sent).toEqual(['foo'])
       })
-      // A late TSP send from the stale rendered editor is not a new prompt.
-      fixture.source.write('/ask\r' + send('/'))
+      fixture.source.write(send('foo'))
+      expect(sent).toEqual(['foo'])
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('submits a native atomic superstring instead of the shorter PTY draft', async () => {
+    const sent: string[] = []
+    const fixture = mount(
+      { enabled: true, idle: true, liveProjectionEnabled: false },
+      (text) => {
+        sent.push(text)
+        return Promise.resolve()
+      },
+    )
+    try {
+      await activate(fixture)
+      fixture.source.write('foo')
+      fixture.source.write(send('foobar'))
       await vi.waitFor(() => {
-        expect(sent).toEqual(['/ask', '/ask'])
+        expect(sent).toEqual(['foobar'])
       })
     } finally {
       fixture.dispose()
     }
   })
 
-  it('accepts a distinct atomic prompt after the cleared PTY frame is acknowledged', async () => {
+  it('submits unrelated atomic text exactly, even with another nonempty PTY draft', async () => {
     const sent: string[] = []
     const fixture = mount(
       { enabled: true, idle: true, liveProjectionEnabled: false },
@@ -300,15 +317,63 @@ describe('mounted Ink/Tern composer lifecycle', () => {
     )
     try {
       await activate(fixture)
-      fixture.source.write('/ask\r' + send('/'))
+      fixture.source.write('local draft')
+      fixture.source.write(send('  external 🌿\\n世界  '))
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['  external 🌿\\n世界  '])
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('treats an empty atomic send as a no-op without submitting its local PTY draft', async () => {
+    const sent: string[] = []
+    const fixture = mount(
+      { enabled: true, idle: true, liveProjectionEnabled: false },
+      (text) => {
+        sent.push(text)
+        return Promise.resolve()
+      },
+    )
+    try {
+      await activate(fixture)
+      fixture.source.write('unsent locally')
+      fixture.source.write(send(''))
+      fixture.source.write(send('   '))
+      expect(sent).toEqual([])
+      fixture.source.write('\\r')
+      await vi.waitFor(() => {
+        expect(sent).toEqual(['unsent locally'])
+      })
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('keeps ordinary /ask Enter and a distinct later atomic / independent across APC reads', async () => {
+    const sent: string[] = []
+    const mode = { enabled: true, idle: true, liveProjectionEnabled: false }
+    const fixture = mount(mode, (text) => {
+      sent.push(text)
+      return Promise.resolve()
+    })
+    try {
+      await activate(fixture)
+      fixture.source.write('/a' + event({ ev: 'ack', sf: 'omnara:session', s: 1 }))
+      fixture.rerender(mode)
+      fixture.source.write('sk' + event({ ev: 'theme', dark: false }))
+      fixture.rerender(mode)
+      fixture.source.write('\\r')
       await vi.waitFor(() => {
         expect(sent).toEqual(['/ask'])
       })
-      fixture.source.write(event({ ev: 'ack', sf: 'omnara:session', s: 1 }))
       fixture.source.write(send('/'))
       await vi.waitFor(() => {
         expect(sent).toEqual(['/ask', '/'])
       })
+      fixture.source.write(send('/'))
+      expect(sent).toEqual(['/ask', '/'])
     } finally {
       fixture.dispose()
     }
