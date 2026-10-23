@@ -243,8 +243,14 @@ export function useTernComposerSurface({
           // that text when the event is an older prefix (or vice versa after a
           // backspace). A distinct atomic send still uses its own event text.
           const local = nativeTextRef.current
-          if (lastPtySubmitted != null && event.text !== '' &&
-              lastPtySubmitted.startsWith(event.text)) return
+          if (
+            lastPtySubmitted != null &&
+            pendingDraftRef.current === '' &&
+            event.text !== '' &&
+            lastPtySubmitted.startsWith(event.text)
+          ) {
+            return
+          }
           const stale =
             ptyEdited &&
             (event.text === '' || local.startsWith(event.text) || event.text.startsWith(local))
