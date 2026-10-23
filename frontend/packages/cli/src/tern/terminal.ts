@@ -4,9 +4,9 @@ import {
   decodeTspEvent,
   decodeTspHello,
   encodeTspHelloQuery,
-  TspChunkAssembler,
   TSP_MAX_INBOUND_BYTES,
   TSP_VERSION,
+  TspChunkAssembler,
   type TspEvent,
   type TspHello,
 } from './protocol.ts'
