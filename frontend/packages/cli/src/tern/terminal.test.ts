@@ -89,3 +89,31 @@ describe('terminal restore on exit', () => {
     expect(source.refs).toBe(0)
   })
 })
+
+describe('terminal native safety fallback', () => {
+  it('accepts negotiated hello and falls back for a Tern surface eviction', () => {
+    const source = new RawTtyInput()
+    const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
+    terminal.probe()
+    const st = String.fromCharCode(27, 92)
+    const apc = (verb: string, body: unknown) =>
+      String.fromCharCode(27) + '_tsp;' + verb + ';' + JSON.stringify(body) + st
+    source.write(apc('r', { r: 'hello', v: 1, term: 'tern', kinds: ['col', 'editor'] }))
+    expect(terminal.getSnapshot().status).toBe('active')
+    source.write(apc('e', { ev: 'gone', sf: 'omnara:session', ids: ['main'] }))
+    expect(terminal.getSnapshot().status).toBe('unsupported')
+    terminal.dispose()
+  })
+
+  it('disables native presentation after an oversized APC without leaking it to Ink', () => {
+    const source = new RawTtyInput()
+    const terminal = new TernTerminal(source, { isTTY: true, write: () => undefined })
+    const inkInput: string[] = []
+    terminal.stdin.on('data', (chunk: Buffer) => inkInput.push(chunk.toString()))
+    terminal.probe()
+    source.write(String.fromCharCode(27) + '_tsp;e;' + 'x'.repeat(1_048_577))
+    expect(terminal.getSnapshot().status).toBe('unsupported')
+    expect(inkInput).toEqual([])
+    terminal.dispose()
+  })
+})

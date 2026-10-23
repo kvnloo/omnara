@@ -71,7 +71,6 @@ export function useTernComposerSurface({
     }
 
     let cancelled = false
-    const isCancelled = (): boolean => cancelled
     let owned = false
     let unsubscribe: (() => void) | undefined
     let unsubscribeKeys: (() => void) | undefined
@@ -79,16 +78,45 @@ export function useTernComposerSurface({
     const hello = surface.hello
     const projectMain = supportsTernLiveSurface(hello)
 
+    const teardown = (): void => {
+      unsubscribe?.()
+      unsubscribe = undefined
+      unsubscribeKeys?.()
+      unsubscribeKeys = undefined
+      const transport = transportRef.current
+      transportRef.current = null
+      let failed = false
+      try {
+        transport?.stop()
+      } catch {
+        failed = true
+      }
+      if (owned) {
+        owned = false
+        try {
+          terminal.endNativeOwnership()
+        } catch {
+          failed = true
+        }
+      }
+      if (resume != null) {
+        const restore = resume
+        resume = undefined
+        void restore().catch(() => terminal.disableNativeSurface())
+      }
+      if (failed) terminal.disableNativeSurface()
+    }
+
     void (async () => {
       try {
         const suspension = await suspendTerminal()
-        // The effect cleanup may have run while suspendTerminal was pending.
-        if (isCancelled()) {
-          await suspension.resume()
+        resume = () => suspension.resume()
+        // A pending Ink suspension may settle after an interaction arrives.
+        if (cancelled) {
+          teardown()
           return
         }
 
-        resume = () => suspension.resume()
         terminal.beginNativeOwnership()
         owned = true
         nativeTextRef.current = draftRef.current
@@ -172,19 +200,15 @@ export function useTernComposerSurface({
           }
         })
       } catch {
-        // TSP is optional presentation. Existing Ink remains authoritative fallback.
+        teardown()
+        // A failed native setup must not leave Ink suspended or retry forever.
+        terminal.disableNativeSurface()
       }
     })()
 
     return () => {
       cancelled = true
-      unsubscribe?.()
-      unsubscribeKeys?.()
-      const transport = transportRef.current
-      transportRef.current = null
-      transport?.stop()
-      if (owned) terminal.endNativeOwnership()
-      if (resume != null) void resume()
+      teardown()
     }
   }, [canOwnSurface, enabled, surface, suspendTerminal, terminal])
 

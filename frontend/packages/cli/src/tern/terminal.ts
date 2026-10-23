@@ -4,6 +4,8 @@ import {
   decodeTspEvent,
   decodeTspHello,
   encodeTspHelloQuery,
+  TspChunkAssembler,
+  TSP_MAX_INBOUND_BYTES,
   TSP_VERSION,
   type TspEvent,
   type TspHello,
@@ -26,6 +28,7 @@ function retainedPrefixLength(value: string, marker: string): number {
 export interface TspInputChunk {
   input: string
   tsp: string[]
+  invalid?: boolean
 }
 
 export class TspInputDecoder {
@@ -35,6 +38,7 @@ export class TspInputDecoder {
     this.pending += chunk
     let input = ''
     const tsp: string[] = []
+    let invalid = false
 
     for (;;) {
       const start = this.pending.indexOf(TSP_START)
@@ -49,14 +53,20 @@ export class TspInputDecoder {
       const end = this.pending.indexOf(ST, start + TSP_START.length)
       if (end === -1) {
         this.pending = this.pending.slice(start)
+        if (Buffer.byteLength(this.pending, 'utf8') > TSP_MAX_INBOUND_BYTES) {
+          this.pending = ''
+          invalid = true
+        }
         break
       }
 
-      tsp.push(this.pending.slice(start + 2, end))
+      const payload = this.pending.slice(start + 2, end)
+      if (Buffer.byteLength(payload, 'utf8') > TSP_MAX_INBOUND_BYTES) invalid = true
+      else tsp.push(payload)
       this.pending = this.pending.slice(end + ST.length)
     }
 
-    return { input, tsp }
+    return invalid ? { input, tsp, invalid: true } : { input, tsp }
   }
 
   flush(): string {
@@ -133,6 +143,7 @@ export class TernInputMux extends PassThrough {
 
   private readonly onSourceData = (data: string | Buffer): void => {
     const decoded = this.decoder.push(data.toString())
+    if (decoded.invalid) this.emit('invalid')
     for (const payload of decoded.tsp) this.emit('tsp', payload)
     if (decoded.input === '') return
     // Tern still delivers ordinary keys as pty input while it shows the native
@@ -155,6 +166,7 @@ type KeyListener = (input: string) => void
 export class TernTerminal {
   readonly stdin: TernInputMux
   private state: TernSurfaceState = { status: 'idle' }
+  private readonly chunks = new TspChunkAssembler()
   private readonly stateListeners = new Set<StateListener>()
   private readonly eventListeners = new Set<EventListener>()
   private readonly keyListeners = new Set<KeyListener>()
@@ -167,6 +179,7 @@ export class TernTerminal {
   ) {
     this.stdin = new TernInputMux(source)
     this.stdin.on('tsp', this.onTsp)
+    this.stdin.on('invalid', this.onInvalid)
     this.stdin.on('keys', this.onKeys)
   }
 
@@ -204,13 +217,26 @@ export class TernTerminal {
     }
 
     this.setState({ status: 'probing' })
-    this.stdout.write(encodeTspHelloQuery())
+    try {
+      this.stdout.write(encodeTspHelloQuery())
+    } catch {
+      this.disableNativeSurface()
+      return
+    }
 
     // Ink itself uses a bounded capability-query timeout for terminal protocols.
     // TSP frames are intercepted by TernInputMux, so they never reach useInput.
     this.probeTimer = setTimeout(() => {
       if (this.state.status === 'probing') this.setState({ status: 'unsupported' })
     }, 200)
+  }
+
+  /** Leave presentation to Ink when the negotiated surface becomes untrustworthy. */
+  disableNativeSurface(): void {
+    if (this.probeTimer != null) clearTimeout(this.probeTimer)
+    this.probeTimer = undefined
+    this.chunks.clear()
+    if (this.state.status !== 'unsupported') this.setState({ status: 'unsupported' })
   }
 
   beginNativeOwnership(): void {
@@ -241,19 +267,26 @@ export class TernTerminal {
     if (this.probeTimer) clearTimeout(this.probeTimer)
     this.endNativeOwnership()
     this.stdin.off('tsp', this.onTsp)
+    this.stdin.off('invalid', this.onInvalid)
     this.stdin.off('keys', this.onKeys)
+    this.chunks.clear()
     this.stdin.dispose()
     this.stateListeners.clear()
     this.eventListeners.clear()
     this.keyListeners.clear()
   }
 
+  private readonly onInvalid = (): void => this.disableNativeSurface()
+
   private readonly onKeys = (input: string): void => {
     for (const listener of this.keyListeners) listener(input)
   }
 
   private readonly onTsp = (payload: string): void => {
-    const hello = decodeTspHello(payload)
+    if (this.state.status === 'unsupported') return
+    const complete = this.chunks.accept(payload)
+    if (complete == null) return
+    const hello = decodeTspHello(complete)
     if (hello) {
       if (this.probeTimer) clearTimeout(this.probeTimer)
       this.probeTimer = undefined
@@ -263,8 +296,17 @@ export class TernTerminal {
       return
     }
 
-    const event = decodeTspEvent(payload)
+    const event = decodeTspEvent(complete)
     if (!event || this.state.status !== 'active') return
+    // No automatic replay into an evicted or rejected Tern document. Resume Ink
+    // rather than assuming surface recovery, missing ACKs, or approval authority.
+    if (
+      (event.ev === 'gone' || event.ev === 'error') &&
+      (!('sf' in event) || event.sf == null || event.sf === 'omnara:session')
+    ) {
+      this.disableNativeSurface()
+      return
+    }
     for (const listener of this.eventListeners) listener(event)
   }
 

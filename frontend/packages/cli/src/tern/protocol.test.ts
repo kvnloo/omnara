@@ -105,7 +105,8 @@ describe('bounded TSP framing and event reassembly', () => {
   it('counts escape headers in the negotiated APC byte limit', async () => {
     const { encodeTspMessage } = await import('./protocol.ts')
     const wire = encodeTspMessage('f', '🌿'.repeat(200), 128)
-    const frames = wire.split('\\x1b\\').filter(Boolean).map((part) => part + '\\x1b\\')
+    const st = String.fromCharCode(27, 92)
+    const frames = wire.split(st).filter(Boolean).map((part) => part + st)
     expect(frames.length).toBeGreaterThan(1)
     for (const packet of frames) expect(Buffer.byteLength(packet, 'utf8')).toBeLessThanOrEqual(128)
     expect(() => encodeTspMessage('f', 'hi', 20)).toThrow(RangeError)
@@ -116,7 +117,8 @@ describe('bounded TSP framing and event reassembly', () => {
     const assembler = new TspChunkAssembler()
     const message = { ev: 'send', sf: TERN_SURFACE_ID, id: TERN_COMPOSER_ID, text: 'a🌿'.repeat(70) }
     const wire = encodeTspMessage('e', JSON.stringify(message), 128)
-    const packets = wire.split('\\x1b\\').filter(Boolean).map((part) => part + '\\x1b\\')
+    const st = String.fromCharCode(27, 92)
+    const packets = wire.split(st).filter(Boolean).map((part) => part + st)
     let decoded: ReturnType<typeof decodeTspEvent> = null
     for (const packet of packets) {
       const complete = assembler.accept(packet.slice(2, -2))
