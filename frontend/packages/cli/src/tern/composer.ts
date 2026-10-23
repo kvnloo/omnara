@@ -21,7 +21,9 @@ export function applyTernComposerEdit(
   current: string,
   event: Extract<TspEvent, { ev: 'edit' }>,
 ): ComposerSnapshot | null {
-  if (event.len !== current.length || event.from > event.to || event.to > current.length) return null
+  if (event.len !== current.length || event.from > event.to || event.to > current.length) {
+    return null
+  }
   const from = clamp(event.from, current.length)
   const to = Math.max(from, clamp(event.to, current.length))
   const text = current.slice(0, from) + event.text + current.slice(to)
@@ -161,7 +163,9 @@ export class TernComposerTransport {
       !Number.isSafeInteger(event.s) ||
       event.s < 1 ||
       event.s > this.seq
-    ) return
+    ) {
+      return
+    }
     this.acked = Math.max(this.acked, event.s)
     if (this.pending != null && this.seq - this.acked < this.credits) {
       const pending = this.pending
