@@ -45,7 +45,7 @@ export class TspInputDecoder {
     let input = ''
     const tsp: string[] = []
     const parts: TspInputPart[] = []
-    let invalid = false
+    const rejected = { current: false }
     const appendInput = (value: string): void => {
       if (value === '') return
       input += value
@@ -54,7 +54,7 @@ export class TspInputDecoder {
       else parts.push({ kind: 'input', data: value })
     }
     const reject = (): void => {
-      invalid = true
+      rejected.current = true
       parts.push({ kind: 'invalid' })
     }
 
@@ -87,7 +87,7 @@ export class TspInputDecoder {
       this.pending = this.pending.slice(end + ST.length)
     }
 
-    return invalid ? { input, tsp, parts, invalid: true } : { input, tsp, parts }
+    return rejected.current ? { input, tsp, parts, invalid: true } : { input, tsp, parts }
   }
 
   flush(): string {
@@ -229,17 +229,23 @@ export class TernTerminal {
 
   readonly subscribeState = (listener: StateListener): (() => void) => {
     this.stateListeners.add(listener)
-    return () => this.stateListeners.delete(listener)
+    return () => {
+      this.stateListeners.delete(listener)
+    }
   }
 
   readonly subscribeEvents = (listener: EventListener): (() => void) => {
     this.eventListeners.add(listener)
-    return () => this.eventListeners.delete(listener)
+    return () => {
+      this.eventListeners.delete(listener)
+    }
   }
 
   readonly subscribeKeys = (listener: KeyListener): (() => void) => {
     this.keyListeners.add(listener)
-    return () => this.keyListeners.delete(listener)
+    return () => {
+      this.keyListeners.delete(listener)
+    }
   }
 
   probe(): void {
@@ -322,7 +328,8 @@ export class TernTerminal {
       }
     }
     this.stdin.setNativeOwnership(false)
-    if (failure != null) throw failure
+    if (failure instanceof Error) throw failure
+    if (failure != null) throw new Error('Failed to restore native TTY', { cause: failure })
   }
 
   write(data: string): void {
@@ -345,7 +352,9 @@ export class TernTerminal {
     }
   }
 
-  private readonly onInvalid = (): void => this.disableNativeSurface()
+  private readonly onInvalid = (): void => {
+    this.disableNativeSurface()
+  }
 
   private readonly onKeys = (input: string): void => {
     for (const listener of this.keyListeners) listener(input)
