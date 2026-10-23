@@ -223,7 +223,7 @@ describe('continuation boundaries under the full Tern wire grammar', () => {
 
   it('keeps long ASCII JSON runs near the negotiated body-size packet count', () => {
     const body = JSON.stringify({ text: 'a'.repeat(4096) })
-    const packets = encodeTspMessage('f', body, 128).split('\x5cx1b\x5c\x5c').filter(Boolean)
+    const packets = encodeTspMessage('f', body, 128).split('\x1b\\').filter(Boolean)
     // Full-size safe continuations must not collapse into one-byte packets.
     expect(packets.length).toBeLessThanOrEqual(40)
     const decoded = packets.map((packet) => parseLikeTern(packet.slice(2)).body).join('')
