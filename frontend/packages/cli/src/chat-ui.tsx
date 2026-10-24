@@ -8,15 +8,22 @@ import {
   type OmnaraUIMessage,
   useAgentChat,
   useAgentInteractions,
+  useAgents,
   useResolveAgentInteraction,
 } from '@omnara/react'
 import * as schemas from '@omnara/sdk/zod'
 import { Box, Static, Text, useApp } from 'ink'
-import { useEffect, useMemo, useReducer, useState } from 'react'
+import { useEffect, useMemo, useReducer, useState, useSyncExternalStore } from 'react'
 import * as z from 'zod'
 
 import { summaryWidth, toolCallSummary } from './agent-rendering.ts'
 import { InteractionPrompt, Label, TextInput } from './chat-prompts.tsx'
+import { supportsTernAgentSurface } from './tern/composer.ts'
+import type { TernPresentationMode } from './tern/config.ts'
+import { projectTernSession } from './tern/liveProjection.ts'
+import { projectTernSubagents } from './tern/subagentProjection.ts'
+import { useTernComposerSurface } from './tern/surface.ts'
+import type { TernTerminal } from './tern/terminal.ts'
 
 type MessagePart = OmnaraUIMessage['parts'][number]
 type ToolPart = Extract<MessagePart, { type: 'dynamic-tool' }>
@@ -358,10 +365,33 @@ function Transcript({ items, live }: { items: TranscriptItem[]; live: OmnaraUIMe
   )
 }
 
-export function Chat({ scope }: { scope: AgentChatScope }) {
+export function Chat({
+  scope,
+  terminal,
+  ternMode = 'composer',
+}: {
+  scope: AgentChatScope
+  terminal: TernTerminal
+  ternMode?: TernPresentationMode
+}) {
   const chat = useAgentChat(scope, { source: 'cli' })
   const interactions = useAgentInteractions(scope.orgID, scope.projectID, scope.agentID)
   const resolveInteraction = useResolveAgentInteraction(scope.orgID, scope.projectID, scope.agentID)
+  const ternSurface = useSyncExternalStore(
+    terminal.subscribeState,
+    terminal.getSnapshot,
+    terminal.getSnapshot,
+  )
+  const liveProjectionEnabled = ternMode === 'live'
+  const nativeAgentsEnabled =
+    liveProjectionEnabled &&
+    ternSurface.status === 'active' &&
+    supportsTernAgentSurface(ternSurface.hello)
+  const subagents = useAgents(scope.orgID, scope.projectID, {
+    filters: { parent_agent_id: scope.agentID, include_archived: true },
+    pageSize: 100,
+    enabled: nativeAgentsEnabled,
+  })
   const { exit } = useApp()
   const [draft, setDraft] = useState('')
 
@@ -383,6 +413,56 @@ export function Chat({ scope }: { scope: AgentChatScope }) {
     interaction == null ? currentActivity(chat.status, chat.isWorking, live) : undefined
   const timer = useWorkTimer(interaction != null ? 'paused' : chat.isWorking ? 'working' : 'idle')
   const lastDuration = interaction == null && !chat.isWorking ? timer.lastDuration : undefined
+  // RFC #12: only an idle composer receives native ownership by default.
+  // #14/#15 streaming and direct-subagent projections are explicit opt-in.
+  const idle = !chat.isWorking && chat.status !== 'submitted'
+  const nativeEnabled =
+    ready && interaction == null && ternMode !== 'off' && (idle || liveProjectionEnabled)
+  const nativeSendable = nativeEnabled && (idle || liveProjectionEnabled)
+  const directSubagents = useMemo(
+    () => subagents.data?.pages.flatMap((page) => page.data) ?? [],
+    [subagents.data],
+  )
+  const nativeMain = useMemo(
+    () =>
+      liveProjectionEnabled
+        ? [
+            ...projectTernSession({
+              messages: chat.messages,
+              backlog: chat.inputBacklog.inputs,
+              status: chat.status,
+              isWorking: chat.isWorking,
+              hasOlderMessages: chat.hasOlderMessages,
+            }),
+            ...projectTernSubagents(directSubagents, subagents.hasNextPage),
+          ]
+        : [],
+    [
+      liveProjectionEnabled,
+      chat.hasOlderMessages,
+      chat.inputBacklog.inputs,
+      chat.isWorking,
+      chat.messages,
+      chat.status,
+      directSubagents,
+      subagents.hasNextPage,
+    ],
+  )
+
+  useTernComposerSurface({
+    terminal,
+    enabled: nativeEnabled,
+    idle,
+    liveProjectionEnabled,
+    sendable: nativeSendable,
+    main: nativeMain,
+    draft,
+    onDraftChange: setDraft,
+    onQuit: exit,
+    onSend: async (text) => {
+      await chat.sendMessage({ text })
+    },
+  })
 
   return (
     <Box flexDirection="column">

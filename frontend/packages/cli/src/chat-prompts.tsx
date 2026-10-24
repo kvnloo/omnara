@@ -1,6 +1,6 @@
 import type { AgentInteraction, InteractionAnswer } from '@omnara/sdk'
-import { Box, Text, useInput } from 'ink'
-import { useRef, useState } from 'react'
+import { Box, Text, useInput, usePaste } from 'ink'
+import { useEffect, useRef, useState } from 'react'
 
 export function Label({ name, color }: { name: string; color: string }) {
   return (
@@ -27,19 +27,57 @@ export function TextInput({
   onChange: (value: string) => void
   onSubmit: (value: string) => void
 }) {
+  // Ink can dispatch several PTY reads before React commits the first edit.
+  // Assemble in the application synchronously; a lagging render must not
+  // replace those bytes with an earlier controlled value.
+  const textRef = useRef(value)
+  const pendingRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (pendingRef.current === value) pendingRef.current = null
+    if (pendingRef.current === null) textRef.current = value
+  }, [value])
+  const change = (next: string): void => {
+    textRef.current = next
+    pendingRef.current = next
+    onChange(next)
+  }
+
+  const submit = (): void => {
+    const current = textRef.current
+    textRef.current = ''
+    // The parent clears its controlled value on submission. Until that
+    // renders, earlier pending edits must not repopulate the next draft.
+    pendingRef.current = ''
+    onSubmit(current)
+  }
+
   useInput((input, key) => {
-    if (key.return) {
-      onSubmit(value)
+    if (key.return || input === '\n') {
+      submit()
       return
     }
     if (key.backspace || key.delete) {
-      onChange(dropLastGrapheme(value))
+      change(dropLastGrapheme(textRef.current))
       return
     }
     if (key.ctrl || key.meta || key.escape || key.tab) return
     if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) return
     if (key.pageUp || key.pageDown) return
-    onChange(value + input)
+
+    // Ink 8 may deliver several ordinary keys and Enter in one readable
+    // chunk. Only the Ink key channel treats CR/LF as submission; paste is
+    // handled separately below so pasted newlines stay literal.
+    if (input.includes('\r') || input.includes('\n')) {
+      for (const part of input.split(/(\r\n|\r|\n)/u)) {
+        if (part === '\r' || part === '\n' || part === '\r\n') submit()
+        else if (part !== '') change(textRef.current + part)
+      }
+      return
+    }
+    if (input !== '') change(textRef.current + input)
+  })
+  usePaste((pasted) => {
+    change(textRef.current + pasted)
   })
   return (
     <Text>

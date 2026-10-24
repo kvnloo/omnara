@@ -17,6 +17,90 @@ omnara --help
 
 Requires Node.js 22 or later.
 
+## Native Tern presentation (downstream experiment)
+
+`omnara agents chat <agent-id>` runs the existing Ink CLI in any terminal.
+Inside a compatible Tern terminal, TSP v1 negotiates an **idle-only native
+composer by default**. The draft and send path remain Omnara-owned. On a
+submitted/running turn or a permission/question interaction, native ownership
+closes and Ink handles transcript, tools, backlog, subagents and approvals.
+Unsupported Tern capabilities, evicted/rejected surfaces, or transport errors
+also return to Ink. No separate backend or credential path is introduced.
+
+Optional live projection from the historical #14/#15 slices is **off by default**.
+To enable native message/tool/backlog/status and direct-subagent projections,
+including native composition while busy, use either:
+
+```sh
+omnara agents chat <agent-id> --tern-live
+OMNARA_TERN_LIVE=1 omnara agents chat <agent-id>
+```
+
+Live mode requires the negotiated native node kinds. Without them, busy turns
+fall back to Ink. Permission/question interactions always remain Ink-owned.
+Set `OMNARA_TERN_NATIVE=0` or use `--no-tern` for the ordinary Ink UI. The
+disable switch wins if both opt-in and disable options are supplied.
+Neither mode moves approvals, agent runtime, event history or SDK semantics into
+Tern. #11's `agents bridge-omp` backend-inversion experiment is excluded.
+
+Development checks from the repository root (`Node >=24`, `pnpm@11.22.0`):
+
+```sh
+cd frontend
+pnpm install --frozen-lockfile
+pnpm --filter omnara test
+pnpm --filter omnara typecheck
+pnpm --filter omnara build
+cd ..
+make web-static-check
+```
+
+The focused **kernel PTY regression** (POSIX + Python 3 standard library, no
+providers or credentials) is included in `pnpm --filter omnara test`. Run it
+separately to isolate raw tty and UTF-8 input failures:
+
+```sh
+cd frontend
+pnpm --filter omnara exec vitest run src/tern/pty.test.ts
+```
+
+It forks a real OS PTY, launches `runChat` with the real React hooks and SDK
+against the existing localhost fixture, and checks fragmented UTF-8 input,
+batched ordinary keys, bracketed multiline paste, interleaved APCs, `/ask`,
+the Ink-owned question and cooked quit at the exact SDK boundary. Exit sends
+no further editor frames on quit, waits for authentic in-flight frame ACKs
+(bounded to 450 ms if none arrive), and only then sends native surface close and
+restores the tty. The PTY test holds real observed ACKs during quit and
+asserts that close follows those ACKs. A **following owned shell sentinel**
+must receive only its own command; a separate case verifies that a missing
+ACK cannot hang exit. The test does not flush arbitrary
+user input. The owned peer only supplies TSP hello/ACK; **it is not the Tern
+application**. The test is skipped on Windows or when Python 3 is unavailable.
+Install Python 3 before accepting this gate.
+
+These checks are not a native terminal acceptance receipt. To run the real
+`runChat` CLI, `@omnara/sdk` client, and `@omnara/react` hooks against a
+self-contained, credential-free loopback HTTP/SSE fixture inside Tern:
+
+```sh
+cd frontend
+pnpm --filter omnara exec tsx src/tern/lab.ts
+pnpm --filter omnara exec tsx src/tern/lab.ts --tern-live
+```
+
+The second command enables live transcript and direct-subagent projection. Send
+`/ask` for an Ink-owned fixture interaction, or ordinary multilingual/multiline
+text for a delayed synthetic turn. The lab binds only to 127.0.0.1 and makes
+no provider calls. Exercise both modes in an owned Tern/pty session, including
+atomic send exactly once, busy/idle handoff, interactions, resize, focus, theme,
+reconnect, eviction/error fallback and terminal exit. Protocol fixtures and
+mounted Ink tests are not proof of actual native Tern behavior.
+
+Tern/TSP and the original OMP native-presentation work: **Can Bölük /
+Stencil Labs**. The native seam follows the Hermes × Tern contributors'
+application-authoritative presentation approach. Omnara contributors own
+the existing durable runtime, React chat state, SDK and Ink CLI.
+
 ## Documentation
 
 See the [Omnara docs](https://docs.omnara.com) and the [GitHub repository](https://github.com/omnara-ai/omnara).
