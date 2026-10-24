@@ -17,6 +17,8 @@ import * as z from 'zod'
 
 import { summaryWidth, toolCallSummary } from './agent-rendering.ts'
 import { InteractionPrompt, Label, TextInput } from './chat-prompts.tsx'
+import { useTernComposerSurface } from './tern/surface.ts'
+import type { TernTerminal } from './tern/terminal.ts'
 
 type MessagePart = OmnaraUIMessage['parts'][number]
 type ToolPart = Extract<MessagePart, { type: 'dynamic-tool' }>
@@ -358,7 +360,7 @@ function Transcript({ items, live }: { items: TranscriptItem[]; live: OmnaraUIMe
   )
 }
 
-export function Chat({ scope }: { scope: AgentChatScope }) {
+export function Chat({ scope, terminal }: { scope: AgentChatScope; terminal: TernTerminal }) {
   const chat = useAgentChat(scope, { source: 'cli' })
   const interactions = useAgentInteractions(scope.orgID, scope.projectID, scope.agentID)
   const resolveInteraction = useResolveAgentInteraction(scope.orgID, scope.projectID, scope.agentID)
@@ -383,6 +385,19 @@ export function Chat({ scope }: { scope: AgentChatScope }) {
     interaction == null ? currentActivity(chat.status, chat.isWorking, live) : undefined
   const timer = useWorkTimer(interaction != null ? 'paused' : chat.isWorking ? 'working' : 'idle')
   const lastDuration = interaction == null && !chat.isWorking ? timer.lastDuration : undefined
+  const nativeComposerReady =
+    ready && interaction == null && !chat.isWorking && chat.status !== 'submitted'
+
+  useTernComposerSurface({
+    terminal,
+    enabled: nativeComposerReady,
+    draft,
+    onDraftChange: setDraft,
+    onQuit: exit,
+    onSend: async (text) => {
+      await chat.sendMessage({ text })
+    },
+  })
 
   return (
     <Box flexDirection="column">
