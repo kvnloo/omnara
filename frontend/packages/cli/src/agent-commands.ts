@@ -6,6 +6,7 @@ import { runChat } from './chat.tsx'
 import { customOp, parseNumberFlag, parseWithSchema } from './factory.ts'
 import { canPromptInteractively, promptAgentSelection } from './interactive.ts'
 import { CliInputError } from './output.ts'
+import { resolveTernPresentation } from './tern/config.ts'
 
 export const agentChatOp = customOp({
   verb: 'chat',
@@ -13,8 +14,13 @@ export const agentChatOp = customOp({
   path: schemas.zListAgentsPath,
   configure: (command) => {
     command.argument('[agent-id]')
+    command.option(
+      '--tern-live',
+      'opt in to native transcript, tools, backlog and direct subagents',
+    )
+    command.option('--no-tern', 'keep all chat presentation in Ink')
   },
-  run: async ({ client, path, args }) => {
+  run: async ({ client, path, args, options }) => {
     if (!canPromptInteractively()) {
       throw new CliInputError('agents chat needs an interactive terminal')
     }
@@ -23,7 +29,14 @@ export const agentChatOp = customOp({
       args[0] ?? (await promptAgentSelection(client, path.orgID, path.projectID)),
       'agent id',
     )
-    await runChat(client, { ...path, agentID })
+    await runChat(
+      client,
+      { ...path, agentID },
+      resolveTernPresentation({
+        ternLive: options.ternLive === true,
+        tern: options.tern !== false,
+      }),
+    )
   },
 })
 
