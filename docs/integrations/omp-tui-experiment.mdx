@@ -1,0 +1,58 @@
+---
+title: OMP TUI backend experiment
+description: Experimental OMP/Tern frontend over Omnara's public agent API
+---
+
+# OMP TUI backend experiment
+
+Companion implementation:
+`kvnloo/oh-my-pi:exp/omnara-backend`.
+
+## Result of surface triage
+
+The first dogfood slice needs **no new Omnara backend protocol**.
+
+The public agent API already exposes the renderer boundary needed by OMP:
+
+```text
+OMP frontend + TSP/Tern
+        ↓
+REST inputs + resumable SSE + interactions
+        ↓
+Omnara durable agent runtime
+```
+
+The experiment consumes:
+
+- agent input creation
+- durable event history
+- event SSE with model deltas
+- tool-call snapshots including subagents
+- interaction snapshots and resolution
+- agent cancellation
+- current agent activity
+
+The internal daemon websocket is intentionally not used. It is a machine/process
+control protocol; coupling a chat renderer to it would bypass Omnara's durable
+agent/event semantics and recreate state reconstruction in the frontend.
+
+## Contract invariants
+
+1. Durable `agent_input`, `model_output`, `tool_result`, and
+   `context_checkpoint` events are transcript truth.
+2. `model_output_delta` is a best-effort preview and is discarded on
+   reconnect until a durable event reconciles it.
+3. `tool_call_update` is a notification only. The renderer refreshes
+   `/tool-calls?include_subagents=true` for authoritative lifecycle state.
+4. Open human prompts come from
+   `/interactions?state=open&include_subagents=true`; decisions are sent only
+   through the interaction-resolution endpoint.
+5. The stream resumes from the last durable event sequence, using the same
+   replay boundary documented for `Last-Event-ID`.
+
+## Provenance
+
+OMP's TUI/TSP implementation is by Can Bölük / Stencil Labs. Omnara's public
+agent API and event model are the work of the Omnara team. Kevin Rajan proposed
+the experiment of keeping the OMP presentation layer intact and swapping only
+the backend runtime boundary.
